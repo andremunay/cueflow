@@ -5,6 +5,30 @@ Note: Sequential implementation steps are documented in `PLAN.md` at the reposit
 ## Workflow Rule
 - Do not mention step numbers (for example, "based on step 2") in branch names or anywhere in a pull request.
 
+## Pull Request Workflow
+
+When creating a pull request, include the following sections:
+
+### What
+Provide a short description of the change.
+
+### Why
+Explain why the change is needed.
+
+### How
+Summarize the implementation approach in a few bullet points.
+
+### Testing
+Document how the change was verified:
+- Automated:
+- Manual:
+
+### Risks
+Describe any migration, compatibility, rollout, or operational concerns.
+
+### Notes for Reviewers
+Highlight where reviewers should focus, what was intentionally deferred, and any context that will make review faster and more effective.
+
 ## Overview
 Cue Builder is a cross-platform mobile MVP built with React Native and Expo. It lets users create timed routines made of timestamped cues and play them back hands-free using system text-to-speech, optional sound pings, and a heads-up alert feature. The app is offline-first, stores data locally, and requires no accounts or paid services.
 
