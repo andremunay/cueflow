@@ -97,4 +97,27 @@ describe('routine transfer parsing', () => {
       expectTransferErrorCode(error, 'ROUTINE_VALIDATION_FAILED');
     }
   });
+
+  it('blocks imports when elapsed cue offsets exceed routine duration', () => {
+    const routineWithOutOfBoundsElapsedCue = createRoutineFixture({
+      routineDurationMs: 10_000,
+      cues: [
+        {
+          id: 'cue-1',
+          offsetMs: 12_000,
+          inputMode: 'elapsed',
+          actionType: 'tts',
+          ttsText: 'too late',
+          headsUpOverride: 'inherit',
+        },
+      ],
+    });
+
+    try {
+      parseRoutineImportPayload(createRoutineExportPayload(routineWithOutOfBoundsElapsedCue));
+      throw new Error('Expected ROUTINE_VALIDATION_FAILED error.');
+    } catch (error) {
+      expectTransferErrorCode(error, 'ROUTINE_VALIDATION_FAILED');
+    }
+  });
 });

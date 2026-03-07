@@ -84,6 +84,20 @@ function cloneRoutine(routine: Routine): Routine {
   };
 }
 
+function hasUniqueCueIds(routine: Routine): boolean {
+  const seenCueIds = new Set<string>();
+
+  for (const cue of routine.cues) {
+    if (seenCueIds.has(cue.id)) {
+      return false;
+    }
+
+    seenCueIds.add(cue.id);
+  }
+
+  return true;
+}
+
 export function createRoutineExportWrapper(routine: Routine): RoutineExportWrapper {
   return {
     version: ROUTINE_EXPORT_VERSION,
@@ -152,6 +166,13 @@ export function deserializeRoutineExportWrapper(rawJson: string): RoutineExportW
     throw new RoutineTransferError(
       'INVALID_ROUTINE_CONTENT',
       'Import file routine payload has an invalid structure.'
+    );
+  }
+
+  if (!hasUniqueCueIds(parsed.routine)) {
+    throw new RoutineTransferError(
+      'INVALID_ROUTINE_CONTENT',
+      'Import file routine payload contains duplicate cue ids.'
     );
   }
 

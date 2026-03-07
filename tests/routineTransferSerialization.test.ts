@@ -117,4 +117,38 @@ describe('routine transfer serialization', () => {
       expectTransferErrorCode(error, 'INVALID_ROUTINE_CONTENT');
     }
   });
+
+  it('rejects duplicate cue ids in imported routines', () => {
+    const payload = JSON.stringify({
+      version: ROUTINE_EXPORT_VERSION,
+      routine: {
+        ...createRoutineFixture(),
+        cues: [
+          {
+            id: 'cue-duplicate',
+            offsetMs: 1_000,
+            inputMode: 'elapsed',
+            actionType: 'tts',
+            ttsText: 'first',
+            headsUpOverride: 'inherit',
+          },
+          {
+            id: 'cue-duplicate',
+            offsetMs: 3_000,
+            inputMode: 'elapsed',
+            actionType: 'tts',
+            ttsText: 'second',
+            headsUpOverride: 'inherit',
+          },
+        ],
+      },
+    });
+
+    try {
+      deserializeRoutineExportWrapper(payload);
+      throw new Error('Expected INVALID_ROUTINE_CONTENT error.');
+    } catch (error) {
+      expectTransferErrorCode(error, 'INVALID_ROUTINE_CONTENT');
+    }
+  });
 });
