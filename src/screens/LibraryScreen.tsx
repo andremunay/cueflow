@@ -1,10 +1,10 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useMemo, useState } from 'react';
-import { Alert, Button, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Alert, Button, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { RootStackParamList } from '../navigation/types';
-import { listRoutines } from '../services';
+import { listRoutines, toggleFavorite } from '../services';
 import type { Routine } from '../types';
 import { filterRoutinesByQuery } from '../utils';
 
@@ -15,6 +15,8 @@ export default function LibraryScreen({ navigation }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pendingFavoriteById, setPendingFavoriteById] = useState<Record<string, true>>({});
+  const pendingFavoriteIdsRef = useRef<Set<string>>(new Set());
 
   const loadRoutines = useCallback(async (isActiveCheck?: () => boolean) => {
     const canUpdateState = isActiveCheck ?? (() => true);
@@ -65,19 +67,120 @@ export default function LibraryScreen({ navigation }: Props) {
     Alert.alert(`${actionLabel} coming soon`, `${actionLabel} support is not implemented yet.`);
   }, []);
 
+  const markFavoritePending = useCallback((routineId: string): boolean => {
+    if (pendingFavoriteIdsRef.current.has(routineId)) {
+      return false;
+    }
+
+    pendingFavoriteIdsRef.current.add(routineId);
+    setPendingFavoriteById((previousPending) => ({ ...previousPending, [routineId]: true }));
+    return true;
+  }, []);
+
+  const clearFavoritePending = useCallback((routineId: string): void => {
+    pendingFavoriteIdsRef.current.delete(routineId);
+    setPendingFavoriteById((previousPending) => {
+      if (!previousPending[routineId]) {
+        return previousPending;
+      }
+
+      const nextPending = { ...previousPending };
+      delete nextPending[routineId];
+      return nextPending;
+    });
+  }, []);
+
+  const openRoutineEditor = useCallback(
+    (routineId: string) => {
+      navigation.navigate('RoutineEditor', { routineId });
+    },
+    [navigation]
+  );
+
+  const handleFavoritePress = useCallback(
+    async (routineId: string) => {
+      if (!markFavoritePending(routineId)) {
+        return;
+      }
+
+      const routineBeforeToggle = routines.find((routine) => routine.id === routineId);
+      if (!routineBeforeToggle) {
+        clearFavoritePending(routineId);
+        return;
+      }
+
+      setErrorMessage(null);
+      setRoutines((previousRoutines) =>
+        previousRoutines.map((routine) =>
+          routine.id === routineId ? { ...routine, favorite: !routine.favorite } : routine
+        )
+      );
+
+      try {
+        const updatedRoutine = await toggleFavorite(routineId);
+        setRoutines((previousRoutines) =>
+          previousRoutines.map((routine) => (routine.id === routineId ? updatedRoutine : routine))
+        );
+      } catch (error: unknown) {
+        setRoutines((previousRoutines) =>
+          previousRoutines.map((routine) =>
+            routine.id === routineId ? routineBeforeToggle : routine
+          )
+        );
+
+        if (error instanceof Error && error.message.trim().length > 0) {
+          Alert.alert('Could not update favorite', error.message);
+        } else {
+          Alert.alert('Could not update favorite', 'An unknown error occurred.');
+        }
+      } finally {
+        clearFavoritePending(routineId);
+      }
+    },
+    [clearFavoritePending, markFavoritePending, routines]
+  );
+
   const renderRoutine = useCallback(
-    ({ item }: { item: Routine }) => (
-      <View style={styles.routineCard}>
-        <View style={styles.routineHeader}>
-          <Text style={styles.routineName}>{item.name || 'Untitled routine'}</Text>
-          <Text style={styles.routineFavorite}>{item.favorite ? '★' : '☆'}</Text>
-        </View>
-        <Text style={styles.routineTags}>
-          {item.tags.length > 0 ? `Tags: ${item.tags.join(', ')}` : 'Tags: none'}
-        </Text>
-      </View>
-    ),
-    []
+    ({ item }: { item: Routine }) => {
+      const isFavoritePending = Boolean(pendingFavoriteById[item.id]);
+
+      return (
+        <Pressable
+          onPress={() => openRoutineEditor(item.id)}
+          style={({ pressed }) => [styles.routineCard, pressed ? styles.routineCardPressed : undefined]}
+        >
+          <View style={styles.routineHeader}>
+            <Text style={styles.routineName}>{item.name || 'Untitled routine'}</Text>
+            <Pressable
+              accessibilityLabel={item.favorite ? 'Unfavorite routine' : 'Favorite routine'}
+              accessibilityRole="button"
+              disabled={isFavoritePending}
+              onPress={(event) => {
+                event.stopPropagation();
+                void handleFavoritePress(item.id);
+              }}
+              style={({ pressed }) => [
+                styles.favoriteButton,
+                pressed || isFavoritePending ? styles.favoriteButtonPressed : undefined,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.routineFavorite,
+                  isFavoritePending ? styles.routineFavoritePending : undefined,
+                ]}
+              >
+                {item.favorite ? '\u2605' : '\u2606'}
+              </Text>
+            </Pressable>
+          </View>
+          <Text style={styles.routineTags}>
+            {item.tags.length > 0 ? `Tags: ${item.tags.join(', ')}` : 'Tags: none'}
+          </Text>
+        </Pressable>
+      );
+    },
+    [handleFavoritePress, openRoutineEditor, pendingFavoriteById]
   );
 
   const hasSavedRoutines = routines.length > 0;
@@ -216,6 +319,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     backgroundColor: '#FFFFFF',
   },
+  routineCardPressed: {
+    opacity: 0.92,
+  },
   routineHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -231,6 +337,17 @@ const styles = StyleSheet.create({
   routineFavorite: {
     fontSize: 22,
     color: '#B8860B',
+  },
+  routineFavoritePending: {
+    color: '#9B9B9B',
+  },
+  favoriteButton: {
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  favoriteButtonPressed: {
+    opacity: 0.6,
   },
   routineTags: {
     marginTop: 6,

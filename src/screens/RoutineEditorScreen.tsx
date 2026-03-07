@@ -270,7 +270,11 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
         await updateRoutine(payload.routine);
       }
 
-      navigation.navigate('Library');
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      } else {
+        navigation.navigate('Library');
+      }
     } catch (error: unknown) {
       setSaveErrorMessage(`Could not save routine. ${getErrorMessage(error)}`);
     } finally {
