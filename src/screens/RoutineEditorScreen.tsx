@@ -165,6 +165,7 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
 
   const isBusy = isHydrating || isSaving;
   const isSaveDisabled = isBusy || editorEvaluation.issues.hasErrors;
+  const canPlaySavedRoutine = isEditMode && Boolean(routineId) && !isBusy;
 
   const saveHelperText = editorEvaluation.issues.hasErrors
     ? 'Resolve errors before saving.'
@@ -295,6 +296,14 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
     tagsText,
   ]);
 
+  const handlePlaySavedRoutine = useCallback(() => {
+    if (!routineId) {
+      return;
+    }
+
+    navigation.navigate('Playback', { routineId });
+  }, [navigation, routineId]);
+
   return (
     <ScrollView
       contentContainerStyle={styles.contentContainer}
@@ -417,6 +426,30 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
       </View>
 
       <View style={styles.saveSection}>
+        {isEditMode ? (
+          <View style={styles.playSavedSection}>
+            <Pressable
+              disabled={!canPlaySavedRoutine}
+              onPress={handlePlaySavedRoutine}
+              style={[
+                styles.playSavedButton,
+                canPlaySavedRoutine ? styles.playSavedButtonEnabled : styles.playSavedButtonDisabled,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.playSavedButtonLabel,
+                  canPlaySavedRoutine
+                    ? styles.playSavedButtonLabelEnabled
+                    : styles.playSavedButtonLabelDisabled,
+                ]}
+              >
+                Play Saved Routine
+              </Text>
+            </Pressable>
+            <Text style={styles.playSavedHelperText}>Runs the last saved version of this routine.</Text>
+          </View>
+        ) : null}
         <Pressable
           disabled={isSaveDisabled}
           onPress={() => void handleSave()}
@@ -513,6 +546,39 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     backgroundColor: '#FFFFFF',
+  },
+  playSavedSection: {
+    marginBottom: 12,
+  },
+  playSavedButton: {
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  playSavedButtonEnabled: {
+    backgroundColor: '#ECF1FF',
+    borderWidth: 1,
+    borderColor: '#2E5BFF',
+  },
+  playSavedButtonDisabled: {
+    backgroundColor: '#F5F5F5',
+    borderWidth: 1,
+    borderColor: '#D8D8D8',
+  },
+  playSavedButtonLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  playSavedButtonLabelEnabled: {
+    color: '#1B3CAA',
+  },
+  playSavedButtonLabelDisabled: {
+    color: '#8A8A8A',
+  },
+  playSavedHelperText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#666666',
   },
   saveButton: {
     borderRadius: 10,
