@@ -93,7 +93,7 @@ function ControlButton({ label, onPress, disabled }: ControlButtonProps) {
 }
 
 export default function PlaybackScreen({ route }: Props) {
-  const routineId = route.params?.routineId;
+  const routineId = route.params.routineId;
   const controllerRef = useRef<PlaybackController | null>(null);
 
   const [routine, setRoutine] = useState<Routine | null>(null);
@@ -106,16 +106,6 @@ export default function PlaybackScreen({ route }: Props) {
     let isActive = true;
 
     setPlaybackState(null);
-
-    if (!routineId) {
-      setRoutine(null);
-      setIsRoutineMissing(true);
-      setLoadErrorMessage(null);
-      setIsLoadingRoutine(false);
-      return () => {
-        isActive = false;
-      };
-    }
 
     setRoutine(null);
     setIsRoutineMissing(false);
@@ -256,9 +246,7 @@ export default function PlaybackScreen({ route }: Props) {
       <View style={styles.stateContainer}>
         <Text style={styles.stateTitle}>No routine selected</Text>
         <Text style={styles.stateText}>
-          {routineId
-            ? `Could not find routine "${routineId}" for playback.`
-            : 'Open Playback with a routine id to begin.'}
+          {`Could not find routine "${routineId}" for playback.`}
         </Text>
       </View>
     );

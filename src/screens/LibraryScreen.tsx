@@ -97,6 +97,13 @@ export default function LibraryScreen({ navigation }: Props) {
     [navigation]
   );
 
+  const openPlayback = useCallback(
+    (routineId: string) => {
+      navigation.navigate('Playback', { routineId });
+    },
+    [navigation]
+  );
+
   const handleFavoritePress = useCallback(
     async (routineId: string) => {
       if (!markFavoritePending(routineId)) {
@@ -177,10 +184,26 @@ export default function LibraryScreen({ navigation }: Props) {
           <Text style={styles.routineTags}>
             {item.tags.length > 0 ? `Tags: ${item.tags.join(', ')}` : 'Tags: none'}
           </Text>
+          <View style={styles.routineActionsRow}>
+            <Pressable
+              accessibilityLabel="Play routine"
+              accessibilityRole="button"
+              onPress={(event) => {
+                event.stopPropagation();
+                openPlayback(item.id);
+              }}
+              style={({ pressed }) => [
+                styles.playButton,
+                pressed ? styles.playButtonPressed : undefined,
+              ]}
+            >
+              <Text style={styles.playButtonLabel}>Play</Text>
+            </Pressable>
+          </View>
         </Pressable>
       );
     },
-    [handleFavoritePress, openRoutineEditor, pendingFavoriteById]
+    [handleFavoritePress, openPlayback, openRoutineEditor, pendingFavoriteById]
   );
 
   const hasSavedRoutines = routines.length > 0;
@@ -353,5 +376,24 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 14,
     color: '#555555',
+  },
+  routineActionsRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  playButton: {
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    backgroundColor: '#2E5BFF',
+  },
+  playButtonPressed: {
+    opacity: 0.8,
+  },
+  playButtonLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });
