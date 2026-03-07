@@ -1,5 +1,5 @@
 import { PLAYBACK_TICK_INTERVAL_TARGET_MS } from '../constants';
-import type { PlaybackState, Routine, SoundId } from '../types';
+import type { Cue, PlaybackState, Routine, SoundId } from '../types';
 import {
   buildOrderedPlaybackCues,
   collectDuePlaybackEvents,
@@ -30,6 +30,8 @@ export interface PlaybackController {
   pause: () => void;
   resume: () => void;
   stop: () => void;
+  skipToNextCue: () => void;
+  replayLastCue: () => void;
   dispose: () => void;
 }
 
@@ -76,6 +78,7 @@ function loadDefaultMediaActions(): PlaybackMediaActions {
 export function createPlaybackController(options: CreatePlaybackControllerOptions): PlaybackController {
   const { routine } = options;
   const orderedCues = buildOrderedPlaybackCues(routine.cues);
+  const cueById = new Map(orderedCues.map(({ cue }) => [cue.id, cue]));
   const defaultNextCueIndex = orderedCues.length > 0 ? 0 : -1;
   const listeners = new Set<PlaybackStateListener>();
   const now = options.now ?? (() => Date.now());
@@ -128,13 +131,7 @@ export function createPlaybackController(options: CreatePlaybackControllerOption
     tickIntervalHandle = null;
   };
 
-  const executeCueEvent = async (event: PlaybackDueEvent): Promise<void> => {
-    if (event.type === 'headsUp') {
-      await safelyInvoke(() => media.playSound('beep'));
-      return;
-    }
-
-    const cue = event.cue;
+  const executeCueAction = async (cue: Cue): Promise<void> => {
     const cueText = cue.ttsText?.trim() ?? '';
     const cueSoundId = cue.soundId ?? 'beep';
 
@@ -160,6 +157,15 @@ export function createPlaybackController(options: CreatePlaybackControllerOption
     if (routine.hapticsEnabled) {
       await safelyInvoke(() => media.triggerHaptic());
     }
+  };
+
+  const executeCueEvent = async (event: PlaybackDueEvent): Promise<void> => {
+    if (event.type === 'headsUp') {
+      await safelyInvoke(() => media.playSound('beep'));
+      return;
+    }
+
+    await executeCueAction(event.cue);
   };
 
   const tick = async (): Promise<void> => {
@@ -309,6 +315,57 @@ export function createPlaybackController(options: CreatePlaybackControllerOption
     emitState();
   };
 
+  const skipToNextCue = (): void => {
+    if (state.status !== 'running') {
+      return;
+    }
+
+    const firedCueIdsSet = new Set(state.firedCueIds);
+    const nextOrderedCue = orderedCues.find(({ cue }) => !firedCueIdsSet.has(cue.id));
+    if (!nextOrderedCue) {
+      return;
+    }
+
+    const nextCue = nextOrderedCue.cue;
+    const firedCueIds = [...state.firedCueIds, nextCue.id];
+    const firedHeadsUpCueIdsSet = new Set(state.firedHeadsUpCueIds);
+    firedHeadsUpCueIdsSet.add(nextCue.id);
+
+    const nowMs = now();
+    const targetElapsedMs = Math.max(state.elapsedMs, nextCue.offsetMs);
+    const routineStartTimeMs =
+      state.routineStartTimeMs === null
+        ? null
+        : nowMs - targetElapsedMs - state.totalPausedMs;
+
+    previousElapsedMs = targetElapsedMs;
+
+    state = {
+      ...state,
+      routineStartTimeMs,
+      elapsedMs: targetElapsedMs,
+      firedCueIds,
+      firedHeadsUpCueIds: Array.from(firedHeadsUpCueIdsSet),
+      lastExecutedCueId: nextCue.id,
+      nextCueIndex: findNextCueSortedIndex(orderedCues, firedCueIds),
+    };
+    emitState();
+    void executeCueAction(nextCue);
+  };
+
+  const replayLastCue = (): void => {
+    if (state.status !== 'running' || state.lastExecutedCueId === null) {
+      return;
+    }
+
+    const cue = cueById.get(state.lastExecutedCueId);
+    if (!cue) {
+      return;
+    }
+
+    void executeCueAction(cue);
+  };
+
   const dispose = (): void => {
     stop();
     listeners.clear();
@@ -328,6 +385,8 @@ export function createPlaybackController(options: CreatePlaybackControllerOption
     pause,
     resume,
     stop,
+    skipToNextCue,
+    replayLastCue,
     dispose,
   };
 }

@@ -161,6 +161,54 @@ describe('createPlaybackController', () => {
     expect(media.speakText).toHaveBeenNthCalledWith(1, 'Resume cue');
   });
 
+  it('skips to the next cue immediately and advances timeline without duplicate firing', async () => {
+    const media = createMockMedia();
+    const clock: TestClock = { value: 0 };
+    const routine = createRoutine({
+      routineDurationMs: 15_000,
+      cues: [
+        createCue({ id: 'cue-1', offsetMs: 8_000, actionType: 'tts', ttsText: 'First' }),
+        createCue({ id: 'cue-2', offsetMs: 12_000, actionType: 'tts', ttsText: 'Second' }),
+      ],
+    });
+
+    const controller = createPlaybackController({
+      routine,
+      tickIntervalMs: 100,
+      now: () => clock.value,
+      media,
+    });
+
+    controller.start();
+    await flushMicrotasks();
+    await advanceTime(clock, 1_000);
+
+    controller.skipToNextCue();
+    await flushMicrotasks();
+
+    const stateAfterSkip = controller.getState();
+    expect(stateAfterSkip.elapsedMs).toBe(8_000);
+    expect(stateAfterSkip.lastExecutedCueId).toBe('cue-1');
+    expect(stateAfterSkip.firedCueIds).toEqual(['cue-1']);
+    expect(stateAfterSkip.firedHeadsUpCueIds).toContain('cue-1');
+    expect(stateAfterSkip.nextCueIndex).toBe(1);
+    expect(media.speakText).toHaveBeenCalledTimes(1);
+    expect(media.speakText).toHaveBeenNthCalledWith(1, 'First');
+    expect(media.playSound).toHaveBeenCalledTimes(0);
+
+    await advanceTime(clock, 1_500);
+    expect(media.playSound).toHaveBeenCalledTimes(1);
+    expect(media.playSound).toHaveBeenNthCalledWith(1, 'beep');
+    expect(media.speakText).toHaveBeenCalledTimes(1);
+
+    await advanceTime(clock, 2_500);
+    expect(media.speakText).toHaveBeenCalledTimes(2);
+    expect(media.speakText).toHaveBeenNthCalledWith(2, 'Second');
+
+    await advanceTime(clock, 2_000);
+    expect(media.speakText).toHaveBeenCalledTimes(2);
+  });
+
   it('uses beep-only heads-up without TTS or haptic at heads-up time', async () => {
     const media = createMockMedia();
     const clock: TestClock = { value: 0 };
@@ -227,6 +275,121 @@ describe('createPlaybackController', () => {
     expect(media.playSound).toHaveBeenNthCalledWith(1, 'chime');
     expect(media.playSound).toHaveBeenNthCalledWith(2, 'whistle');
     expect(media.triggerHaptic).toHaveBeenCalledTimes(0);
+  });
+
+  it('replays the last executed cue without replaying heads-up or shifting playback state', async () => {
+    const media = createMockMedia();
+    const clock: TestClock = { value: 0 };
+    const routine = createRoutine({
+      routineDurationMs: 9_000,
+      cues: [createCue({ id: 'cue-1', offsetMs: 4_000, actionType: 'tts', ttsText: 'Repeat me' })],
+    });
+
+    const controller = createPlaybackController({
+      routine,
+      tickIntervalMs: 100,
+      now: () => clock.value,
+      media,
+    });
+
+    controller.start();
+    await flushMicrotasks();
+    await advanceTime(clock, 4_000);
+
+    const stateBeforeReplay = controller.getState();
+    expect(stateBeforeReplay.lastExecutedCueId).toBe('cue-1');
+    expect(media.playSound).toHaveBeenCalledTimes(1);
+    expect(media.speakText).toHaveBeenCalledTimes(1);
+
+    controller.replayLastCue();
+    await flushMicrotasks();
+
+    const stateAfterReplay = controller.getState();
+    expect(stateAfterReplay.elapsedMs).toBe(stateBeforeReplay.elapsedMs);
+    expect(stateAfterReplay.firedCueIds).toEqual(stateBeforeReplay.firedCueIds);
+    expect(stateAfterReplay.firedHeadsUpCueIds).toEqual(stateBeforeReplay.firedHeadsUpCueIds);
+    expect(stateAfterReplay.nextCueIndex).toBe(stateBeforeReplay.nextCueIndex);
+    expect(media.speakText).toHaveBeenCalledTimes(2);
+    expect(media.speakText).toHaveBeenNthCalledWith(2, 'Repeat me');
+    expect(media.playSound).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats skip and replay as no-ops when not running', async () => {
+    const media = createMockMedia();
+    const clock: TestClock = { value: 0 };
+    const routine = createRoutine({
+      routineDurationMs: 1_500,
+      cues: [createCue({ id: 'cue-1', offsetMs: 1_000, actionType: 'tts', ttsText: 'Only cue' })],
+    });
+
+    const controller = createPlaybackController({
+      routine,
+      tickIntervalMs: 100,
+      now: () => clock.value,
+      media,
+    });
+
+    controller.skipToNextCue();
+    controller.replayLastCue();
+    expect(media.speakText).toHaveBeenCalledTimes(0);
+    expect(media.playSound).toHaveBeenCalledTimes(0);
+
+    controller.start();
+    await flushMicrotasks();
+    controller.pause();
+    controller.skipToNextCue();
+    controller.replayLastCue();
+    expect(media.speakText).toHaveBeenCalledTimes(0);
+    expect(media.playSound).toHaveBeenCalledTimes(0);
+
+    controller.resume();
+    await flushMicrotasks();
+    await advanceTime(clock, 1_500);
+    expect(controller.getState().status).toBe('completed');
+    expect(media.speakText).toHaveBeenCalledTimes(1);
+
+    controller.skipToNextCue();
+    controller.replayLastCue();
+    expect(media.speakText).toHaveBeenCalledTimes(1);
+    expect(media.playSound).toHaveBeenCalledTimes(0);
+
+    controller.stop();
+    controller.skipToNextCue();
+    controller.replayLastCue();
+    expect(media.speakText).toHaveBeenCalledTimes(1);
+    expect(media.playSound).toHaveBeenCalledTimes(0);
+  });
+
+  it('treats skip and replay as no-ops when target cues are missing while running', async () => {
+    const media = createMockMedia();
+    const clock: TestClock = { value: 0 };
+    const routine = createRoutine({
+      routineDurationMs: 8_000,
+      cues: [createCue({ id: 'cue-1', offsetMs: 5_000, actionType: 'tts', ttsText: 'Skippable' })],
+    });
+
+    const controller = createPlaybackController({
+      routine,
+      tickIntervalMs: 100,
+      now: () => clock.value,
+      media,
+    });
+
+    controller.start();
+    await flushMicrotasks();
+    controller.replayLastCue();
+    await flushMicrotasks();
+    expect(media.speakText).toHaveBeenCalledTimes(0);
+
+    controller.skipToNextCue();
+    await flushMicrotasks();
+    expect(media.speakText).toHaveBeenCalledTimes(1);
+    expect(media.speakText).toHaveBeenNthCalledWith(1, 'Skippable');
+
+    controller.skipToNextCue();
+    await flushMicrotasks();
+    expect(media.speakText).toHaveBeenCalledTimes(1);
+    expect(media.playSound).toHaveBeenCalledTimes(0);
   });
 
   it('resets execution state on stop and clears ticking on dispose', async () => {
