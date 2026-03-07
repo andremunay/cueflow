@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   CueRowEditor,
@@ -8,7 +9,12 @@ import {
   RoutineSettingsSection,
   TagInput,
 } from '../components/editor';
+import type { RootStackParamList } from '../navigation/types';
+import { createRoutine, getRoutine, updateRoutine } from '../services';
 import type { CueActionType, CueInputMode, HeadsUpOverride, SoundId } from '../types';
+import { buildRoutineSavePayload, evaluateEditorDraft, toEditorCueTimeText } from '../utils';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'RoutineEditor'>;
 
 interface CueDraft {
   id: string;
@@ -28,9 +34,9 @@ function generateCueDraftId(): string {
   return `cue-draft-${cueDraftIdCounter}`;
 }
 
-function createDefaultCueDraft(overrides?: Partial<Omit<CueDraft, 'id'>>): CueDraft {
+function createDefaultCueDraft(overrides?: Partial<CueDraft>): CueDraft {
   return {
-    id: generateCueDraftId(),
+    id: overrides?.id ?? generateCueDraftId(),
     timeText: '00:00',
     inputMode: 'elapsed',
     actionType: 'tts',
@@ -41,7 +47,18 @@ function createDefaultCueDraft(overrides?: Partial<Omit<CueDraft, 'id'>>): CueDr
   };
 }
 
-export default function RoutineEditorScreen() {
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return 'Unknown error';
+}
+
+export default function RoutineEditorScreen({ navigation, route }: Props) {
+  const routineId = route.params?.routineId;
+  const isEditMode = typeof routineId === 'string' && routineId.length > 0;
+
   const [routineName, setRoutineName] = useState('');
   const [tagsText, setTagsText] = useState('');
   const [favorite, setFavorite] = useState(false);
@@ -50,9 +67,116 @@ export default function RoutineEditorScreen() {
   const [hapticsEnabled, setHapticsEnabled] = useState(false);
   const [duckPlannedFlag, setDuckPlannedFlag] = useState(false);
   const [cueDrafts, setCueDrafts] = useState<CueDraft[]>([createDefaultCueDraft()]);
+  const [isHydrating, setIsHydrating] = useState(isEditMode);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isEditMode || !routineId) {
+      setIsHydrating(false);
+      return;
+    }
+
+    let isActive = true;
+    setIsHydrating(true);
+    setSaveErrorMessage(null);
+
+    void (async () => {
+      try {
+        const existingRoutine = await getRoutine(routineId);
+        if (!isActive) {
+          return;
+        }
+
+        if (!existingRoutine) {
+          Alert.alert('Routine not found', 'That routine no longer exists.', [
+            {
+              text: 'OK',
+              onPress: () => navigation.navigate('Library'),
+            },
+          ]);
+          return;
+        }
+
+        setRoutineName(existingRoutine.name);
+        setTagsText(existingRoutine.tags.join(', '));
+        setFavorite(existingRoutine.favorite);
+        setRoutineDurationText(toEditorCueTimeText(existingRoutine.routineDurationMs, 'elapsed', 0));
+        setDefaultHeadsUpEnabled(existingRoutine.defaultHeadsUpEnabled);
+        setHapticsEnabled(existingRoutine.hapticsEnabled);
+        setDuckPlannedFlag(existingRoutine.duckPlannedFlag);
+        setCueDrafts(
+          existingRoutine.cues.map((cue) =>
+            createDefaultCueDraft({
+              id: cue.id,
+              timeText: toEditorCueTimeText(
+                cue.offsetMs,
+                cue.inputMode,
+                existingRoutine.routineDurationMs
+              ),
+              inputMode: cue.inputMode,
+              actionType: cue.actionType,
+              ttsText: cue.ttsText ?? '',
+              soundId: cue.soundId ?? DEFAULT_SOUND_ID,
+              headsUpOverride: cue.headsUpOverride,
+            })
+          )
+        );
+      } catch (error: unknown) {
+        if (!isActive) {
+          return;
+        }
+
+        Alert.alert('Could not load routine', getErrorMessage(error), [
+          {
+            text: 'OK',
+            onPress: () => navigation.navigate('Library'),
+          },
+        ]);
+      } finally {
+        if (isActive) {
+          setIsHydrating(false);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isEditMode, navigation, routineId]);
+
+  const editorEvaluation = useMemo(
+    () =>
+      evaluateEditorDraft({
+        routineDurationText,
+        cues: cueDrafts,
+      }),
+    [cueDrafts, routineDurationText]
+  );
+
+  const saveMessages = useMemo(() => {
+    const messages = [...editorEvaluation.issues.routineMessages];
+    if (saveErrorMessage) {
+      messages.push({ severity: 'error', message: saveErrorMessage });
+    }
+
+    return messages;
+  }, [editorEvaluation.issues.routineMessages, saveErrorMessage]);
+
+  const isBusy = isHydrating || isSaving;
+  const isSaveDisabled = isBusy || editorEvaluation.issues.hasErrors;
+
+  const saveHelperText = editorEvaluation.issues.hasErrors
+    ? 'Resolve errors before saving.'
+    : editorEvaluation.issues.hasWarnings
+      ? 'Warnings found. Save is still allowed.'
+      : isSaving
+        ? 'Saving...'
+        : 'Ready to save.';
 
   const updateCueDraftField = useCallback(
     <K extends keyof CueDraft>(cueId: string, field: K, value: CueDraft[K]) => {
+      setSaveErrorMessage(null);
       setCueDrafts((previousCues) =>
         previousCues.map((cue) => (cue.id === cueId ? { ...cue, [field]: value } : cue))
       );
@@ -61,6 +185,7 @@ export default function RoutineEditorScreen() {
   );
 
   const moveCue = useCallback((cueIndex: number, direction: -1 | 1) => {
+    setSaveErrorMessage(null);
     setCueDrafts((previousCues) => {
       const targetIndex = cueIndex + direction;
       if (cueIndex < 0 || cueIndex >= previousCues.length) {
@@ -79,6 +204,7 @@ export default function RoutineEditorScreen() {
   }, []);
 
   const duplicateCue = useCallback((cueIndex: number) => {
+    setSaveErrorMessage(null);
     setCueDrafts((previousCues) => {
       if (cueIndex < 0 || cueIndex >= previousCues.length) {
         return previousCues;
@@ -101,6 +227,7 @@ export default function RoutineEditorScreen() {
   }, []);
 
   const deleteCue = useCallback((cueIndex: number) => {
+    setSaveErrorMessage(null);
     setCueDrafts((previousCues) => {
       if (cueIndex < 0 || cueIndex >= previousCues.length) {
         return previousCues;
@@ -111,8 +238,58 @@ export default function RoutineEditorScreen() {
   }, []);
 
   const addCue = useCallback(() => {
+    setSaveErrorMessage(null);
     setCueDrafts((previousCues) => [...previousCues, createDefaultCueDraft()]);
   }, []);
+
+  const handleSave = useCallback(async () => {
+    if (isSaveDisabled || editorEvaluation.routineDurationMs === null) {
+      return;
+    }
+
+    setSaveErrorMessage(null);
+    setIsSaving(true);
+
+    try {
+      const payload = buildRoutineSavePayload({
+        mode: isEditMode ? 'update' : 'create',
+        routineId,
+        routineName,
+        tagsText,
+        favorite,
+        routineDurationMs: editorEvaluation.routineDurationMs,
+        defaultHeadsUpEnabled,
+        hapticsEnabled,
+        duckPlannedFlag,
+        normalizedCues: editorEvaluation.normalizedCues,
+      });
+
+      if (payload.operation === 'create') {
+        await createRoutine(payload.routine);
+      } else {
+        await updateRoutine(payload.routine);
+      }
+
+      navigation.navigate('Library');
+    } catch (error: unknown) {
+      setSaveErrorMessage(`Could not save routine. ${getErrorMessage(error)}`);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [
+    defaultHeadsUpEnabled,
+    duckPlannedFlag,
+    editorEvaluation.normalizedCues,
+    editorEvaluation.routineDurationMs,
+    favorite,
+    hapticsEnabled,
+    isEditMode,
+    isSaveDisabled,
+    navigation,
+    routineId,
+    routineName,
+    tagsText,
+  ]);
 
   return (
     <ScrollView
@@ -126,24 +303,60 @@ export default function RoutineEditorScreen() {
         <LabeledTextField
           label="Routine name"
           value={routineName}
-          onChangeText={setRoutineName}
+          onChangeText={(value) => {
+            setSaveErrorMessage(null);
+            setRoutineName(value);
+          }}
           placeholder="Morning workout"
           returnKeyType="done"
+          editable={!isBusy}
         />
-        <TagInput value={tagsText} onChangeText={setTagsText} />
-        <FavoriteToggle value={favorite} onValueChange={setFavorite} />
+        <TagInput
+          value={tagsText}
+          onChangeText={(value) => {
+            setSaveErrorMessage(null);
+            setTagsText(value);
+          }}
+          editable={!isBusy}
+        />
+        <FavoriteToggle
+          value={favorite}
+          onValueChange={(value) => {
+            setSaveErrorMessage(null);
+            setFavorite(value);
+          }}
+          disabled={isBusy}
+        />
       </View>
 
       <RoutineSettingsSection
         durationText={routineDurationText}
-        onDurationTextChange={setRoutineDurationText}
+        onDurationTextChange={(value) => {
+          setSaveErrorMessage(null);
+          setRoutineDurationText(value);
+        }}
         defaultHeadsUpEnabled={defaultHeadsUpEnabled}
-        onDefaultHeadsUpEnabledChange={setDefaultHeadsUpEnabled}
+        onDefaultHeadsUpEnabledChange={(value) => {
+          setSaveErrorMessage(null);
+          setDefaultHeadsUpEnabled(value);
+        }}
         hapticsEnabled={hapticsEnabled}
-        onHapticsEnabledChange={setHapticsEnabled}
+        onHapticsEnabledChange={(value) => {
+          setSaveErrorMessage(null);
+          setHapticsEnabled(value);
+        }}
         duckPlannedFlag={duckPlannedFlag}
-        onDuckPlannedFlagChange={setDuckPlannedFlag}
-        durationHelperText="Required before using countdown cue times."
+        onDuckPlannedFlagChange={(value) => {
+          setSaveErrorMessage(null);
+          setDuckPlannedFlag(value);
+        }}
+        durationErrorText={editorEvaluation.issues.durationErrorText}
+        durationHelperText={
+          editorEvaluation.issues.durationErrorText
+            ? undefined
+            : 'Required before using countdown cue times.'
+        }
+        disabled={isBusy}
       />
 
       <View style={styles.section}>
@@ -182,23 +395,48 @@ export default function RoutineEditorScreen() {
                 onDelete={() => deleteCue(index)}
                 disableMoveUp={index === 0}
                 disableMoveDown={index === cueDrafts.length - 1}
+                disabled={isBusy}
+                timeErrorText={editorEvaluation.issues.cueTimeErrorById[cue.id]}
+                timeHelperText={
+                  editorEvaluation.issues.cueTimeErrorById[cue.id]
+                    ? undefined
+                    : editorEvaluation.issues.cueTimeWarningById[cue.id]
+                }
               />
             ))}
           </View>
         )}
 
-        <Pressable onPress={addCue} style={styles.addCueButton}>
+        <Pressable disabled={isBusy} onPress={addCue} style={styles.addCueButton}>
           <Text style={styles.addCueButtonLabel}>Add Cue</Text>
         </Pressable>
       </View>
 
       <View style={styles.saveSection}>
-        <Pressable disabled style={[styles.saveButton, styles.saveButtonDisabled]}>
-          <Text style={[styles.saveButtonLabel, styles.saveButtonLabelDisabled]}>Save (Step 10)</Text>
+        <Pressable
+          disabled={isSaveDisabled}
+          onPress={() => void handleSave()}
+          style={[styles.saveButton, isSaveDisabled ? styles.saveButtonDisabled : styles.saveButtonEnabled]}
+        >
+          <Text style={[styles.saveButtonLabel, isSaveDisabled ? styles.saveButtonLabelDisabled : styles.saveButtonLabelEnabled]}>
+            {isSaving ? 'Saving...' : isEditMode ? 'Save Changes' : 'Save Routine'}
+          </Text>
         </Pressable>
-        <Text style={styles.saveHelperText}>
-          Save wiring, normalization, and validation will be added in Step 10.
-        </Text>
+        <Text style={styles.saveHelperText}>{saveHelperText}</Text>
+        {isHydrating ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size="small" color="#2E5BFF" />
+            <Text style={styles.loadingText}>Loading routine...</Text>
+          </View>
+        ) : null}
+        {saveMessages.map((message, index) => (
+          <Text
+            key={`${message.severity}-${index}`}
+            style={message.severity === 'error' ? styles.errorMessageText : styles.warningMessageText}
+          >
+            {message.message}
+          </Text>
+        ))}
       </View>
     </ScrollView>
   );
@@ -282,6 +520,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#D0D0D0',
   },
+  saveButtonEnabled: {
+    backgroundColor: '#2E5BFF',
+  },
   saveButtonLabel: {
     fontSize: 16,
     fontWeight: '700',
@@ -289,9 +530,32 @@ const styles = StyleSheet.create({
   saveButtonLabelDisabled: {
     color: '#7A7A7A',
   },
+  saveButtonLabelEnabled: {
+    color: '#FFFFFF',
+  },
   saveHelperText: {
     marginTop: 8,
     fontSize: 12,
     color: '#666666',
+  },
+  loadingRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  loadingText: {
+    fontSize: 13,
+    color: '#444444',
+  },
+  errorMessageText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#B00020',
+  },
+  warningMessageText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#8A5A00',
   },
 });
