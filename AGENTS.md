@@ -1,5 +1,7 @@
 # Cue Builder — Project Details
 
+Note: Sequential implementation steps are documented in `PLAN.md` at the repository root.
+
 ## Overview
 Cue Builder is a cross-platform mobile MVP built with React Native and Expo. It lets users create timed routines made of timestamped cues and play them back hands-free using system text-to-speech, optional sound pings, and a heads-up alert feature. The app is offline-first, stores data locally, and requires no accounts or paid services.
 
