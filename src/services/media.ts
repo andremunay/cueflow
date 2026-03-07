@@ -24,7 +24,8 @@ async function ensureAudioModeConfigured(): Promise<void> {
       playsInSilentMode: true,
       allowsRecording: false,
       interruptionMode: 'mixWithOthers',
-      shouldPlayInBackground: false,
+      // Background playback is best effort and still subject to OS lifecycle policies.
+      shouldPlayInBackground: true,
       shouldRouteThroughEarpiece: false,
     })
       .then(() => {
@@ -84,6 +85,8 @@ export async function speakText(text: string, options: SpeakTextOptions = {}): P
     return;
   }
 
+  await ensureAudioModeConfigured();
+
   if (options.interrupt !== false) {
     await Speech.stop();
   }
@@ -93,6 +96,7 @@ export async function speakText(text: string, options: SpeakTextOptions = {}): P
     language: options.language ?? 'en-US',
     rate: options.rate,
     pitch: options.pitch,
+    useApplicationAudioSession: true,
   });
 }
 

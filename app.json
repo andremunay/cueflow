@@ -28,7 +28,14 @@
     },
     "plugins": [
       "expo-sharing",
-      "expo-audio",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true,
+          "enableBackgroundRecording": false,
+          "recordAudioAndroid": true
+        }
+      ],
       "expo-asset"
     ]
   }
