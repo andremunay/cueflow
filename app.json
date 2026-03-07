@@ -33,7 +33,7 @@
         {
           "enableBackgroundPlayback": true,
           "enableBackgroundRecording": false,
-          "recordAudioAndroid": true
+          "recordAudioAndroid": false
         }
       ],
       "expo-asset"
