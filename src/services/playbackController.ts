@@ -58,6 +58,18 @@ function createBaseState(routineId: string, nextCueIndex: number): PlaybackState
   };
 }
 
+function isHeadsUpEnabledForCue(cue: Cue, defaultHeadsUpEnabled: boolean): boolean {
+  switch (cue.headsUpOverride) {
+    case 'on':
+      return true;
+    case 'off':
+      return false;
+    case 'inherit':
+    default:
+      return defaultHeadsUpEnabled;
+  }
+}
+
 async function safelyInvoke(action: () => Promise<void> | void): Promise<void> {
   try {
     await action();
@@ -161,7 +173,9 @@ export function createPlaybackController(options: CreatePlaybackControllerOption
 
   const executeCueEvent = async (event: PlaybackDueEvent): Promise<void> => {
     if (event.type === 'headsUp') {
-      await safelyInvoke(() => media.playSound('beep'));
+      if (isHeadsUpEnabledForCue(event.cue, routine.defaultHeadsUpEnabled)) {
+        await safelyInvoke(() => media.playSound('beep'));
+      }
       return;
     }
 
