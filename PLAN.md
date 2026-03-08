@@ -1,141 +1,195 @@
-﻿# Cue Builder — Sequential Codex Build Plan
+# Cue Builder - Sequential Codex Build Plan
 
-This file is meant to be used manually, step by step, with Codex. Each Step assumes the previous one has already been completed and reviewed. The Steps are intentionally scoped to reduce drift and keep implementation aligned with the MVP.
+This plan now reflects the current repository state.
+
+- Steps 1-21 preserve the existing baseline that is already implemented in the repo. Their names and prompts have been updated to match the code that exists today.
+- Steps 22+ define the next phase of work: preset foundation.
+- When using this file with Codex for new work, start at the first unfinished step unless you are intentionally revisiting an earlier baseline area.
 
 ## How to Use
-- Run one Step at a time.
-- Review the code after each step before moving to the next Step.
-- Keep scope limited to the MVP.
-- Do not let Codex invent extra features.
+- Run one step at a time.
+- Review the code after each step before moving to the next step.
+- Preserve existing behavior unless the current step explicitly changes it.
+- Keep scope limited to the current phase of the plan.
 - Require TypeScript throughout.
 - Keep the repo runnable with `npm install` and `npx expo start`.
 
 ---
 
-## Step 1 — Initialize the Expo TypeScript app
+## Step 1 - Preserve the Expo TypeScript app scaffold
 
 ```text
-Create a production-oriented Expo React Native app in TypeScript for a project called “Cue Builder”. Use a single-app repo. Set up the base folder structure for src/components, src/screens, src/navigation, src/services, src/utils, src/types, src/constants, src/hooks, tests, and assets/sounds. Configure package.json scripts so the project runs with `npm install` and `npx expo start`. Add a minimal App.tsx entry point and a basic README with startup instructions. Do not add extra features.
+Preserve the existing Expo React Native TypeScript single-app setup. Keep the current root entry files (`App.tsx`, `index.ts`), npm scripts, README startup path, `src/` layout, `tests/` folder, and `assets/sounds/` folder. Do not re-bootstrap or replace the app scaffold unless the task explicitly requires it.
 ```
 
-## Step 2 — Install and wire core dependencies
+## Step 2 - Preserve and extend the current dependency and navigation wiring
 
 ```text
-Add and configure the core dependencies for this Expo TypeScript app: React Navigation, AsyncStorage, and any Expo modules needed for audio playback, file import/export, sharing, haptics, and speech/TTS support. Keep choices Expo-friendly. Set up navigation with a root stack for Library, Routine Editor, Playback, and a simple Presets Coming Soon placeholder screen. Ensure the app still runs after dependency setup.
+Work with the existing Expo-friendly dependency set: React Navigation, AsyncStorage, Expo Audio, Expo Speech, Expo Haptics, Expo Document Picker, Expo File System, Expo Sharing, and Expo Asset. Keep the root stack navigation for Library, Routine Editor, Playback, and Presets. Ensure dependency changes remain Expo-compatible and do not break `npx expo start`.
 ```
 
-## Step 3 — Define domain types and constants
+## Step 3 - Preserve the current domain model and constants
 
 ```text
-Create the TypeScript domain model for Cue Builder. Add types for Routine, Cue, CueActionType, CueInputMode, HeadsUpOverride, export wrapper versioning, validation results, and playback state. Add constants for max routine duration (2 hours), max cue count (200), tick interval target, and sound IDs (beep/chime/whistle). Keep the model aligned with this schema: routine has id, name, tags, favorite, routineDurationMs, defaultHeadsUpEnabled, hapticsEnabled, duckPlannedFlag, and cues[]; cue has id, offsetMs, inputMode, actionType, ttsText or soundId, and headsUpOverride.
+Keep the domain model aligned with the current repo, not the earlier draft schema. The routine model includes: `id`, `name`, `tags`, `favorite`, `routineDurationMs`, `startDelayMs`, `headsUpEnabled`, `headsUpLeadTimeMs`, `hapticsEnabled`, `duckPlannedFlag`, and `cues[]`. The cue model includes: `id`, `offsetMs`, `actionType`, optional `ttsText`, optional `soundId`, `headsUpOverride`, and optional `headsUpLeadTimeMs`. Preserve the current constants for max routine duration, max cue count, playback tick target, default start delay, default heads-up lead time, and sound ids.
 ```
 
-## Step 4 — Build time parsing and normalization utilities
+## Step 4 - Preserve and extend the current time and editor input utilities
 
 ```text
-Implement pure utility functions in TypeScript for parsing and formatting cue times. Support `mm:ss` and `hh:mm:ss`. Add conversion logic for elapsed and countdown entry modes. Countdown must require routineDurationMs and convert using `elapsedOffsetMs = routineDurationMs - remainingMs`. Validate that converted values fall within [0, routineDurationMs]. Return clean error objects rather than throwing for common user-input cases. Add unit tests for parsing, formatting, countdown conversion, and edge cases.
+Work with the existing pure TypeScript utilities for parsing and formatting `mm:ss` and `hh:mm:ss`, validating millisecond values, formatting editor settings input, formatting playback display values, and normalizing cue offsets. The current editor uses elapsed-offset entry only; do not reintroduce countdown mode unless a later plan step explicitly requires it. Keep common user-input failures as structured errors instead of thrown exceptions.
 ```
 
-## Step 5 — Build routine validation logic
+## Step 5 - Preserve the current routine validation rules
 
 ```text
-Implement pure validation logic for routines and cues. Enforce errors for negative times, duplicate timestamps, duration over 2 hours, cue count over 200, missing required routine duration, and invalid countdown conversions. Return warnings—not errors—for overlaps and out-of-order cues. Save should be blockable on errors only. Add unit tests covering all validation rules and warnings-vs-errors behavior.
+Keep the pure validation layer for routines and cues. Preserve errors for missing duration, negative times, cue times outside duration, duplicate timestamps, duration above 2 hours, and cue count above 200. Preserve warnings for out-of-order cues and near-overlapping cues. Keep warning/error separation intact so save and import remain blocked only by errors.
 ```
 
-## Step 6 — Create local storage services
+## Step 6 - Preserve the versioned local storage services
 
 ```text
-Implement an AsyncStorage-backed storage layer for routines. Add create, read, update, delete, list, and favorite-toggle support. Store everything locally only. Include data migration handling for a versioned wrapper if helpful, but do not add cloud sync or auth. Add lightweight tests for serialization/deserialization helpers where practical.
+Keep the AsyncStorage-backed routine storage layer and its strict serialization rules. Preserve CRUD operations, favorite-toggle support, the storage key `@cue-builder/routines`, snapshot versioning, and duplicate-id protection for routines and cues. Do not add cloud sync or auth. Storage remains local-only and schema validation remains strict.
 ```
 
-## Step 7 — Create the Library screen
+## Step 7 - Preserve the current Library screen behavior
 
 ```text
-Build the Library screen. It must show all saved routines with name, tags, and favorite star. Add a simple search bar that searches name plus tags. Add a “New Routine” button. Add import/export entry points. For empty state, show two buttons: “Start with a preset” leading to a placeholder screen/message saying “Presets coming soon”, and “Create custom routine”. Keep the UI functional and simple.
+Maintain the Library screen as the local routine hub. It must continue to list routines with name, tags, and favorite state; support search across name and tags; support creating a new routine; expose JSON import/export; and show the preset entry plus custom-create action in the empty state. Keep the UI functional and direct.
 ```
 
-## Step 8 — Create reusable editor row components
+## Step 8 - Preserve the reusable editor components
 
 ```text
-Build reusable UI components for the routine editor: text input fields, tag input, favorite toggle, routine settings section, cue row editor, action type selector, sound selector, heads-up override selector, and row action controls for reorder/duplicate/delete. Keep the cue editor table/list based only—do not add a timeline view.
+Maintain the reusable editor UI components under `src/components/editor`, including labeled text fields, tag input, favorite toggle, routine settings section, cue row editor, action type selector, sound selector, heads-up override selector, and cue row actions. Keep the editor list-based and do not introduce a timeline UI.
 ```
 
-## Step 9 — Build the Routine Editor screen shell
+## Step 9 - Preserve the current Routine Editor shell
 
 ```text
-Create the Routine Editor screen for creating and editing routines. Add fields for name, tags, favorite, routine duration, default heads-up, haptics, and duck flag labeled as planned/no-op. Add a cues list editor using the reusable row components. Each cue row must support time input, entry mode (elapsed/countdown), action type (tts/sound/combo), content fields, heads-up override, reorder, duplicate, and delete. Add an “Add Cue” action. Do not implement save yet beyond local component state.
+Keep the Routine Editor create/edit shell aligned with the current implementation. It supports routine name, tags, favorite, routine duration, start delay, heads-up toggle, heads-up lead time, haptics, duck flag, and cue rows with time input, action type, TTS text, sound selection, heads-up override, optional cue-specific lead time, preview, duplicate, delete, and collapse/expand behavior. Do not regress the create/edit experience.
 ```
 
-## Step 10 — Connect editor state, normalization, and validation
+## Step 10 - Preserve editor normalization, validation, and persistence
 
 ```text
-Wire the Routine Editor screen to the parsing, normalization, and validation utilities. Internally normalize all cue times to elapsed offsets in milliseconds. Show inline warnings and errors on cue rows and routine-level fields. Disable Save when errors exist. Allow Save when only warnings exist. Persist saved routines using the AsyncStorage service. Support editing existing routines as well as creating new ones.
+Keep the Routine Editor connected to the current parsing, normalization, validation, and storage layers. Preserve inline field errors and warnings, save blocking on errors, save allowance on warnings, create/update flows, unsaved-change prompts, delete support, and the current `Play Saved Routine` behavior in edit mode. Continue to store normalized elapsed offsets in milliseconds.
 ```
 
-## Step 11 — Add routine row actions and library integration
+## Step 11 - Preserve library/editor integration
 
 ```text
-Connect the Library and Routine Editor flows fully. From the Library, users must be able to create a new routine, open an existing routine for editing, toggle favorite, and see updates reflected immediately after saving. Keep the search over name and tags working. Do not add extra filters or sorting beyond what the MVP requires.
+Maintain the full Library <-> Routine Editor flow. Users must continue to create routines, edit existing ones, toggle favorite, return to the library with updates reflected, and keep search behavior stable. Do not add advanced sorting, folders, or filters in this phase.
 ```
 
-## Step 12 — Add bundled sound assets and media wrappers
+## Step 12 - Preserve bundled sound assets and media wrappers
 
 ```text
-Add bundled sound assets for beep, chime, and whistle under assets/sounds and wire them into the app. Create a media service wrapper that can play those sound effects, trigger system speech/TTS in English, and trigger haptics/vibration when requested. Keep the API simple so playback logic can call `playSound`, `speakText`, and `triggerHaptic`. Document any platform constraints in code comments where relevant.
+Keep the bundled `beep`, `chime`, and `whistle` assets under `assets/sounds` and preserve the media service wrapper API for sound playback, speech, and haptics. Playback logic should continue to rely on simple calls such as `playSound`, `speakText`, and `triggerHaptic`. Keep platform-specific behavior isolated behind the media service.
 ```
 
-## Step 13 — Implement playback scheduling core
+## Step 13 - Preserve the playback scheduling core
 
 ```text
-Implement the playback engine as isolated logic plus a React-friendly controller. Minimize drift by tracking routineStartTime, computing elapsed from system time, tracking totalPausedMs, and using a short interval tick between 100 and 250ms. Do not use one timeout per cue. Add explicit fired tracking for cues and heads-up events so nothing double-fires. Support heads-up ping at t-3s, cue execution at cue time, and optional haptics at cue time. Add unit tests for scheduling math and fired-state handling.
+Maintain the isolated playback scheduling and controller logic. Preserve system-time-based elapsed calculation, total paused time tracking, interval-based ticking, explicit fired tracking for cue and heads-up events, and drift-resistant event collection. Keep the current heads-up behavior: beep-only, default 1-second lead time, configurable routine lead time, optional cue-specific lead time when override is `on`, and no double-firing.
 ```
 
-## Step 14 — Implement playback control semantics exactly
+## Step 14 - Preserve the current playback control semantics
 
 ```text
-Complete the playback control logic with exact behavior for Start, Pause, Resume, Stop, Skip to Next Cue, and Replay Last Cue. Pause/resume must shift remaining cues later by the paused duration so the timeline continues from “now”. Skip to Next Cue must immediately jump to the next cue and fire its action. Replay Last Cue must immediately re-fire the last executed cue action and must not replay heads-up. Add unit tests for pause shift, skip-next behavior, and replay-last behavior.
+Keep the exact control behavior for Start, Pause, Resume, Stop, Skip Next, and Replay Last. Preserve start delay handling, pause/resume shifting through accumulated paused time, skip-next immediate cue firing, and replay-last behavior that re-fires only the last cue action without replaying heads-up audio. Keep controller behavior covered by tests.
 ```
 
-## Step 15 — Build the Playback screen
+## Step 15 - Preserve the Playback screen
 
 ```text
-Create the Playback screen or integrated playback panel using the playback engine. Show routine name, elapsed clock, next cue time/action, and an upcoming cues list with the current cue highlighted. Add controls for Start, Pause, Resume, Stop, Skip Next, and Replay Last. Ensure the screen reflects current playback state accurately.
+Maintain the Playback screen as the main runtime UI for a saved routine. It must continue to show routine name, status, elapsed clock, next cue time/action, controls, and the upcoming cue list with current/fired cue highlighting. Keep the display synchronized with the playback controller state.
 ```
 
-## Step 16 — Connect library/editor to playback flow
+## Step 16 - Preserve playback launch flows from saved routines
 
 ```text
-Add the user flow from the Library and/or Routine Editor into Playback so a saved routine can be launched cleanly. Ensure playback uses the persisted normalized data model. Keep the UX straightforward and avoid adding extra screens or options.
+Keep the user flow from the Library and Routine Editor into Playback using persisted routine data. Playback should continue to load a saved routine by id and run against the normalized stored model. Do not introduce a separate preset-only playback path or bypass persistence for normal routine playback.
 ```
 
-## Step 17 — Add import/export JSON support
+## Step 17 - Preserve the current JSON import/export flow
 
 ```text
-Implement routine export/import using a versioned JSON format and OS-native share/file-picker flows. Export shape must be `{ "version": 1, "routine": { ... } }`. Import must validate the structure before saving. Audio files are not part of export. Add clear user-facing error handling for invalid JSON or incompatible structure. Keep everything local-only.
+Maintain the versioned JSON import/export system with the wrapper shape `{ "version": 1, "routine": { ... } }`. Keep OS-native share and file-picker flows, strict structure validation, duplicate-id checks, warning/error handling, and user-facing error messages for invalid or incompatible payloads. Keep everything local-only.
 ```
 
-## Step 18 — Add best-effort background playback support
+## Step 18 - Preserve best-effort background playback support
 
 ```text
-Implement best-effort background playback for Expo as far as the platform allows. Use Expo-supported configuration, config plugins, or a custom dev client only if needed. Do not over-engineer or expand scope. Document clearly in the README what works on iOS and Android, especially for screen-off and backgrounded playback limitations.
+Keep the current best-effort background playback setup based on Expo Audio configuration. Preserve honest handling of platform limitations and keep behavior documented in the README. Do not over-engineer background execution or introduce platform-specific scope beyond what Expo can reasonably support in this app.
 ```
 
-## Step 19 — Add the placeholder preset entry
+## Step 19 - Preserve the original preset placeholder baseline
 
 ```text
-Ensure the empty library state includes a “Start with a preset” button that opens a simple placeholder screen or message saying “Presets coming soon”. Do not implement an actual preset library. Also ensure “Create custom routine” is available from the same empty state.
+Preserve the historical baseline that the library empty state exposes a preset entry point and the app includes a Presets screen route. This placeholder existed before the preset foundation work begins. Later steps may replace the placeholder screen with a real preset flow, but they should keep the entry point intuitive and avoid breaking the empty-state create path.
 ```
 
-## Step 20 — Finalize README and manual QA checklist
+## Step 20 - Preserve README and manual QA coverage
 
 ```text
-Write a thorough README for the Cue Builder app. Include setup and run commands, feature overview, architecture summary, local storage behavior, known limitations, and honest notes about background playback constraints on iOS and Android. Add a manual QA checklist covering audio cues, TTS, heads-up behavior, pause/resume, skip/replay, persistence, import/export, and background behavior.
+Keep the README focused on setup, feature overview, architecture summary, storage behavior, known limitations, background playback constraints, and manual QA guidance. When features change, update the README honestly rather than carrying stale claims forward.
 ```
 
-## Step 21 — Final polish and acceptance pass
+## Step 21 - Preserve the current acceptance baseline and polish bar
 
 ```text
-Review the app against the acceptance criteria and tighten the implementation without adding new scope. Verify that the app supports: persisted routines after restart, accurate cue order, pause/resume shift, heads-up overrides, TTS-only/sound-only/combo cues, favorite/tags/search, background playback best-effort, and export/import fidelity. Clean up typing issues, remove dead code, and make sure the final repo runs with `npm install` and `npx expo start`.
+Treat the existing app as the baseline to preserve while adding new work. Keep persistence, playback ordering, pause/resume behavior, heads-up overrides, TTS/sound/combo cues, favorite/tags/search, background playback best-effort, and import/export fidelity intact. Clean up typing issues and dead code when touched, but do not expand scope casually.
+```
+
+---
+
+## Step 22 - Define the preset domain model and generator contract
+
+```text
+Introduce the preset foundation as a first-class but local-only feature. Add TypeScript types for preset categories, preset metadata, configurable preset fields, preset preview data, and a generator contract that produces ordinary Cue Builder routine drafts. Presets must generate the same routine/cue model the app already stores and plays back. Do not create a second playback or storage model for presets.
+```
+
+## Step 23 - Build reusable preset generation primitives
+
+```text
+Create pure generator helpers that can be reused by many presets. Focus on a small set of foundations such as interval rounds, repeated work/rest blocks, counted cadence sequences, reminder cadence, and agenda timebox generation. Keep these helpers deterministic and unit-testable. The goal is to support many future presets without hardcoding each one as a unique one-off routine builder.
+```
+
+## Step 24 - Add the first local preset catalog and category metadata
+
+```text
+Create a local static preset catalog with category labels, titles, descriptions, tags, and preview summaries. Keep the initial catalog intentionally small but representative so the foundation is validated without attempting the full library yet. Use generator-backed presets rather than hand-authored raw routines wherever possible. Keep all preset definitions on-device and in-repo; no remote CMS or service.
+```
+
+## Step 25 - Replace the placeholder Presets screen with a real catalog flow
+
+```text
+Turn the current Presets route into a real preset catalog screen. Group or label presets by category, show enough metadata to help selection, and keep the UI consistent with the existing app. Ensure users can reach presets from the empty library state and from a visible entry point when routines already exist. Do not build advanced discovery features yet beyond what is needed for the preset foundation.
+```
+
+## Step 26 - Add preset configuration, preview, and validation
+
+```text
+Implement a lightweight preset configuration flow so each preset can collect only the fields it needs before generation. Reuse the app's existing time input conventions where practical. Show a human-readable preview of what the preset will generate, validate inputs before continuing, and keep the forms simple rather than building a generic form platform that is broader than needed.
+```
+
+## Step 27 - Generate editable routine drafts from presets
+
+```text
+When a user chooses a preset, generate a standard Cue Builder routine draft and hand it off to the Routine Editor for review and editing before save. Do not auto-save generated routines without review. Keep the editor as the single place where generated routines become normal saved routines, so validation, storage, and playback continue to run through the existing paths.
+```
+
+## Step 28 - Seed the foundation with a small representative preset set
+
+```text
+Add a limited first batch of presets that proves the foundation works across multiple use cases without attempting the full preset library. Favor a compact set such as one interval preset, one mindfulness/breathing preset, one productivity preset, and one agenda/timebox preset. Make sure each preset exercises the new generator contract and results in a useful editable routine.
+```
+
+## Step 29 - Add preset tests, documentation, and final preset-foundation polish
+
+```text
+Add unit tests for preset generators, configuration validation, and draft generation. Add focused UI or integration coverage where practical. Update the README and any contributor docs to describe the preset catalog, configuration flow, and limitations of the first preset phase. Finish with a regression pass to ensure existing routine creation, storage, import/export, and playback behavior still work after preset foundation lands.
 ```
 
 ---
@@ -148,13 +202,16 @@ Use these constraints every time you hand a step to Codex:
 Constraints:
 - TypeScript only.
 - React Native + Expo single-app repo.
-- Keep scope strictly within the MVP.
+- Preserve existing shipped behavior unless the current step intentionally changes it.
+- Keep scope limited to the current phase of the plan.
+- Presets must generate ordinary routines that use the existing storage, validation, and playback model.
+- Do not create a separate preset-only runtime or storage format.
 - No timeline editor.
 - No cloud sync or auth.
-- No preset library beyond placeholder.
 - No external audio overlay/integration.
 - No custom sound import.
 - No paid services.
+- No full preset expansion beyond the preset foundation steps in this plan.
 - Keep the app runnable with `npm install` and `npx expo start`.
 - Prefer small, reviewable changes.
 - Show all files created or modified.
@@ -165,8 +222,5 @@ Constraints:
 Append this when Codex starts drifting:
 
 ```text
-Do not add features that are not explicitly required. Do not rename core concepts. Keep storage local-only. Preserve existing functionality unless a change is required to satisfy the current task. If a platform limitation prevents full behavior, implement the best possible version and document the limitation instead of expanding scope.
+Do not add features that are not explicitly required. Do not rename core concepts without a strong reason. Keep storage local-only. Preserve existing functionality unless a change is required to satisfy the current task. For preset work, keep all definitions local and route generated output through the ordinary routine editor, validation, storage, and playback paths. If a platform limitation prevents full behavior, implement the best possible version and document the limitation instead of expanding scope.
 ```
-
-
-

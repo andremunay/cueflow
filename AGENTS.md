@@ -1,6 +1,6 @@
-# Cue Builder — Project Details
+# Cue Builder - Current Project State
 
-Note: Sequential implementation steps are documented in `PLAN.md` at the repository root.
+Note: `PLAN.md` documents the original implementation sequence. `README.md` is the user-facing setup and QA guide. This file should describe the repository as it exists today so contributors and coding agents work from the current source of truth.
 
 ## Workflow Rule
 - Do not mention step numbers (for example, "based on step 2") in branch names or anywhere in a pull request.
@@ -30,195 +30,94 @@ Describe any migration, compatibility, rollout, or operational concerns.
 Highlight where reviewers should focus, what was intentionally deferred, and any context that will make review faster and more effective.
 
 ## Overview
-Cue Builder is a cross-platform mobile MVP built with React Native and Expo. It lets users create timed routines made of timestamped cues and play them back hands-free using system text-to-speech, optional sound pings, and a heads-up alert feature. The app is offline-first, stores data locally, and requires no accounts or paid services.
 
-The product is designed for people who need guided routines with precise timing, such as workouts, breathing exercises, rehearsal blocks, coaching sequences, practice drills, and personal routines.
+Cue Builder is an offline-first Expo + React Native app for building and running timed cue routines with text-to-speech, bundled sound effects, optional heads-up pings, import/export, and local persistence.
 
-## Product Goal
-Build a production-quality MVP for a mobile “Cue Builder” app where users create routines as timestamped cues and play them hands-free with system TTS and optional sound pings, including a heads-up feature.
+The repository currently contains a functional MVP with:
+- a routine library
+- a routine editor
+- a playback screen
+- AsyncStorage persistence
+- JSON import/export
+- bundled audio assets
+- unit tests for the core logic
 
-## Primary Users
-- Individuals creating timed personal routines
-- Coaches or instructors building reusable cue sequences
-- Performers, speakers, or athletes rehearsing timed steps
-- Anyone who needs audible prompts while keeping hands free
+## Current Stack
 
-## Core User Value
-Users can build, save, organize, and run routines without needing internet access, accounts, or manual interaction during playback.
+- Expo SDK `55`
+- React `19`
+- React Native `0.83`
+- TypeScript
+- React Navigation native stack
+- AsyncStorage
+- Expo Audio
+- Expo Speech
+- Expo Haptics
+- Expo Document Picker
+- Expo File System
+- Expo Sharing
 
-## MVP Scope
+## Current App Flow
 
-### Included
-- Cross-platform mobile app using React Native + Expo + TypeScript
-- Offline-first local storage with AsyncStorage
-- Routine library with save/edit/name, favorites, tags, and search
-- Routine editor using a table/list editor only
-- Required routine duration field
-- Cue time entry in both elapsed and countdown modes
-- Internal normalization to elapsed offsets from start in milliseconds
-- Cue action types:
-  - TTS phrase
-  - Built-in sound effect
-  - Combo: ping then voice
-- Bundled sound assets:
-  - beep
-  - chime
-  - whistle
-- Heads-up support:
-  - routine default heads-up setting
-  - per-cue override: inherit / off / on
-  - fixed MVP behavior: ping-only at t-3s
-- Playback controls:
+### Library Screen
+- Loads saved routines from AsyncStorage.
+- Supports search across routine name and tags.
+- Supports creating a new routine.
+- Supports JSON import through file picker.
+- Supports JSON export through the OS share sheet.
+- Supports in-place favorite toggling.
+- Tapping a routine card opens playback.
+- The Edit action opens the routine editor.
+- Empty state includes:
+  - `Start with a preset` -> placeholder screen
+  - `Create custom routine`
+
+### Routine Editor Screen
+- Supports create and edit flows.
+- Edits routine name, tags, and favorite state.
+- Requires routine duration.
+- Includes configurable routine start delay.
+- Includes routine heads-up toggle and routine heads-up lead time.
+- Includes haptics toggle.
+- Includes duck flag toggle labeled as planned/no-op.
+- Cue rows support:
+  - cue time input (`mm:ss` or `hh:mm:ss`)
+  - action type (`tts`, `sound`, `combo`)
+  - TTS text
+  - sound selection (`beep`, `chime`, `whistle`)
+  - heads-up override (`inherit`, `off`, `on`)
+  - optional cue-specific heads-up lead time when override is `on`
+  - preview
+  - duplicate
+  - delete
+  - collapse/expand
+- Cues auto-order by normalized elapsed time when their time values are valid.
+- Save is blocked on errors and allowed on warnings.
+- Edit mode includes:
+  - unsaved-change prompt when leaving
+  - delete routine action
+  - `Play Saved Routine` button that runs the last saved version
+
+### Playback Screen
+- Loads a saved routine by id.
+- Displays routine name, status, elapsed clock, next cue, and upcoming cues.
+- Supports:
   - Start
   - Pause
   - Resume
   - Stop
-  - Skip to Next Cue
-  - Replay Last Cue
-- Pause/resume schedule shifting based on paused duration
-- Optional haptics/vibration at cue time
-- Duck flag in model and UI labeled as planned/no-op
-- JSON export/import using share sheet and file picker
-- README with setup, limitations, and QA checklist
-- Unit tests for pure functions
+  - Skip Next
+  - Replay Last
+- Highlights the current upcoming cue.
+- Marks fired cues visually.
 
-### Explicitly Excluded
-- Timeline editor
-- Full preset library
-- Playing over external audio with overlay/interrupt behavior
-- Audio mixing with other apps
-- Custom sound import
-- Layered sound actions beyond combo ping+voice
-- Custom voice upload
-- Voice controls
-- Non-English TTS
-- Cloud sync
-- Accounts/auth
-- Folders/categories/advanced sorting/filtering
-- Paid services
-
-## Product Requirements
-
-### Routine Limits
-- Maximum routine duration: 2 hours
-- Maximum cues per routine: 200
-
-### Time Entry Rules
-- Routine duration is required
-- Support two UI input modes:
-  - elapsed offset
-  - countdown
-- Countdown conversion:
-  - `remainingMs = user entry`
-  - `elapsedOffsetMs = routineDurationMs - remainingMs`
-- Validation:
-  - elapsed offset must be within `[0, routineDurationMs]`
-  - no negative times
-
-### Validation Rules
-Errors:
-- negative times
-- duplicate timestamps
-- routine duration over 2 hours
-- cue count over 200
-- invalid countdown conversion outside duration bounds
-
-Warnings:
-- overlaps
-- out-of-order cues
-
-Save behavior:
-- Save is blocked on errors
-- Save remains allowed on warnings
-
-## Required Screens
-
-### Library Screen
-Must include:
-- list of routines
-- name, tags, favorite star visible in list
-- search bar searching name + tags
-- new routine button
-- export/import entry points
-- empty state with:
-  - “Start with a preset” → placeholder message/screen: “Presets coming soon”
-  - “Create custom routine”
-
-### Routine Editor Screen
-Must include:
-- name
-- tags
-- favorite toggle
-- routine duration
-- default heads-up toggle
-- haptics toggle
-- duck flag toggle labeled planned/no-op
-- cue list editor with rows containing:
-  - time input (`mm:ss` or `hh:mm:ss`)
-  - entry mode: elapsed vs countdown
-  - action type: TTS / Sound / Combo
-  - text content for TTS
-  - sound selector for sound/combo
-  - per-cue heads-up override: inherit / off / on
-  - reorder up/down
-  - duplicate
-  - delete
-- inline warnings and errors
-- Save button blocked on errors
-
-### Playback Screen or Playback Panel
-Must include:
-- routine name
-- elapsed clock
-- next cue time/action
-- controls: Start, Pause, Resume, Stop, Skip Next, Replay Last
-- upcoming cue list with current cue highlighted
-
-## Playback Behavior
-
-### Scheduling Strategy
-To minimize drift:
-- track `routineStartTime`
-- compute elapsed using system time rather than chained timeouts
-- track `totalPausedMs`
-- use a short interval tick (100–250ms)
-- detect crossing cue times robustly
-- do not schedule 200 independent timers
-
-### Heads-Up Behavior
-- heads-up is ping-only at 3 seconds before cue time
-- no spoken countdown
-- per-cue override can inherit, disable, or force enable
-- prevent double-firing using explicit fired tracking
-
-### Cue Execution
-At cue time:
-- optional heads-up ping may already have fired at t-3s
-- fire cue action:
-  - TTS
-  - sound
-  - combo ping then TTS
-- optional haptic at cue time
-- document whether haptic also fires at heads-up; MVP should choose one behavior and keep it consistent
-
-### Playback Control Semantics
-- **Start**: begin from time zero
-- **Pause**: suspend progress
-- **Resume**: shift remaining cues forward by paused duration so timeline continues from current time
-- **Stop**: end playback and reset execution state
-- **Skip to Next Cue**: immediately jump to next cue and fire its action
-- **Replay Last Cue**: immediately re-fire last executed cue action only; do not replay heads-up
-
-## Background Playback
-Best-effort background playback is required. Implementation may use Expo config plugins or a custom dev client if needed. Platform constraints must be documented honestly in the README, especially around locked-screen/background behavior on iOS and Android.
-
-## Data Model
+## Current Data Model
 
 ### Export Wrapper
 ```json
 {
   "version": 1,
-  "routine": { ... }
+  "routine": { "...": "Routine payload" }
 }
 ```
 
@@ -230,7 +129,9 @@ Best-effort background playback is required. Implementation may use Expo config 
   tags: string[];
   favorite: boolean;
   routineDurationMs: number;
-  defaultHeadsUpEnabled: boolean;
+  startDelayMs: number;
+  headsUpEnabled: boolean;
+  headsUpLeadTimeMs: number;
   hapticsEnabled: boolean;
   duckPlannedFlag: boolean;
   cues: Cue[];
@@ -241,53 +142,69 @@ Best-effort background playback is required. Implementation may use Expo config 
 ```ts
 {
   id: string;
-  offsetMs: number; // normalized elapsed offset
-  inputMode: 'elapsed' | 'countdown';
+  offsetMs: number;
   actionType: 'tts' | 'sound' | 'combo';
   ttsText?: string;
   soundId?: 'beep' | 'chime' | 'whistle';
   headsUpOverride: 'inherit' | 'off' | 'on';
+  headsUpLeadTimeMs?: number;
 }
 ```
 
-## Technical Architecture
+## Current Timing and Playback Behavior
 
-### Stack
-- React Native
-- Expo
-- TypeScript
-- React Navigation
-- AsyncStorage
+- Routine start delay defaults to `3000` ms.
+- Routine heads-up lead time defaults to `1000` ms.
+- Heads-up is beep-only.
+- Heads-up timing is configurable at the routine level.
+- A cue with heads-up override `on` may also carry a cue-specific lead time.
+- Combo cue behavior is sound first, then TTS.
+- Haptics fire at cue time only when enabled.
+- The playback scheduler computes elapsed time from system time instead of chaining one timer per cue.
+- Target playback tick interval is `150` ms.
+- Pause/resume works by tracking total paused duration.
+- Skip Next immediately fires the next cue action and marks that cue as already handled.
+- Replay Last re-fires only the last cue action and does not replay heads-up audio.
 
-### Suggested App Layers
-- `app/` or `src/` screens and navigation
-- reusable UI components
-- domain types and constants
-- storage layer for routines
-- playback engine / scheduler
-- utility layer for parsing, normalization, and validation
-- import/export service
-- sound/TTS/haptics service wrappers
-- test suite for pure logic
+## Validation and Limits
 
-### Key Services
-- **Storage service**: save/load/update/delete routines in AsyncStorage
-- **Validation service**: routine and cue validation with warnings vs errors
-- **Time utility service**: parse/format times and convert countdown to elapsed offsets
-- **Playback engine**: schedule ticking, fired tracking, pause/resume shifting, skip/replay logic
-- **Media service**: play bundled sounds, invoke system TTS, trigger haptics
-- **Import/export service**: serialize/deserialize versioned JSON and integrate with picker/share APIs
+- Maximum routine duration: `7_200_000` ms (2 hours)
+- Maximum cue count: `200`
+- Routine duration is required and must be a positive integer number of milliseconds.
+- Cue times must be non-negative.
+- Cue times must fall within the routine duration.
+- Duplicate cue timestamps are validation errors.
+- Cue count above the max is a validation error.
+- Duration above the max is a validation error.
+- Out-of-order cues are validation warnings.
+- Near-overlapping cues are validation warnings.
+- Overlap warning threshold is `3000` ms.
+- Save is blocked on validation errors and allowed on warnings.
+- Import is blocked on validation errors and allowed on warnings.
 
-## UX Notes
-- Keep the editor simple and table-like; do not introduce a timeline UI
-- Preserve clarity between warnings and errors
-- Make countdown entry understandable by clearly requiring routine duration first
-- Keep the playback screen highly legible with current status and next cue visibility
-- Empty state should guide users while acknowledging presets are not yet available
+## Storage and Transfer
 
-## Suggested File/Folder Structure
+- Local storage key: `@cue-builder/routines`
+- Local storage snapshot version: `1`
+- Export wrapper version: `1`
+- Storage serialization is strict and rejects unsupported structures.
+- Storage and import serialization reject duplicate cue ids.
+- Import rejects invalid JSON, unsupported versions, incompatible payload shapes, and invalid routine content.
+- Storage lives in `src/services/routineStorage.ts`; there is no separate `src/store/` implementation at the moment.
+
+## Background Playback
+
+- `app.json` enables the `expo-audio` plugin with background playback support.
+- Background playback is best effort and platform dependent.
+- Validate background behavior in development builds, not only Expo Go.
+- iOS and Android may still interrupt or delay playback depending on OS policy, device behavior, or long quiet periods.
+
+## Repository Layout
+
+Current source layout:
+
 ```text
-cue-builder/
+cueflow/
   assets/
     sounds/
       beep.wav
@@ -295,51 +212,57 @@ cue-builder/
       whistle.wav
   src/
     components/
-    screens/
-    navigation/
-    hooks/
-    services/
-    store/
-    utils/
-    types/
+      editor/
     constants/
+    hooks/
+    navigation/
+    screens/
+    services/
+    types/
+    utils/
   tests/
   App.tsx
   app.json
+  index.ts
   package.json
   README.md
+  PLAN.md
 ```
 
-## Acceptance Criteria
-1. Create a routine with 6 cues, validate times, save it, restart app, and verify persistence.
-2. Playback fires cues in correct order and supports both TTS and sound cues.
-3. Pause for about 10 seconds, resume, and remaining cues shift later correctly.
-4. Heads-up works using routine default and per-cue override rules.
-5. TTS-only, sound-only, and combo cues all function.
-6. Favorites, tags, and search work in the library.
-7. Background playback works where platform permits, with limitations documented.
-8. Export/import preserves routine name, tags, cues, and settings.
+Notes:
+- `src/hooks/` currently exists as a placeholder only.
+- `src/store/` is not present; storage logic lives under `src/services/`.
+- `dist/` may be present in the repository, but the source of truth for application code is `src/` plus the root Expo entry files.
 
-## Testing Requirements
-Unit tests are required for pure logic, including:
-- time parsing
-- time formatting
-- countdown normalization
-- duplicate timestamp detection
-- duration and cue count limit validation
-- warning/error separation
-- scheduling math
-- pause/resume shift calculations
+## Current Gaps and Non-Goals
 
-## Definition of Done
-The MVP is complete when:
-- the app runs with `npm install` and `npx expo start`
-- all required screens and controls are implemented
-- offline local persistence works
-- playback works with TTS/sound/combo actions
-- heads-up, pause/resume, skip, and replay follow spec
-- export/import works with versioned JSON
-- bundled sound assets are included in repo
-- README documents setup, features, and limitations
-- unit tests cover core pure logic
-- scope remains limited to the MVP and excludes listed non-goals
+- No timeline editor.
+- No preset library beyond the placeholder screen.
+- No cloud sync, accounts, or authentication.
+- No custom sound import.
+- No layered audio behavior beyond combo ping + TTS.
+- No guaranteed overlay/mixing behavior with external audio apps.
+- Duck flag is persisted but currently has no runtime effect.
+- Countdown-vs-elapsed cue entry mode is not implemented in the current editor; cue times are currently entered as elapsed offsets only.
+
+## Test Status
+
+Latest local verification in this repository:
+- `npm test -- --runInBand`
+- Result: `14` test suites passed, `132` tests passed
+
+Current automated test coverage includes:
+- time parsing and formatting
+- editor time input formatting
+- cue preview command generation
+- routine validation
+- editor transforms
+- cue expansion helpers
+- library filtering
+- playback display formatting
+- playback scheduler math
+- playback controller behavior
+- storage serialization
+- storage service CRUD behavior
+- transfer serialization
+- import/export behavior
