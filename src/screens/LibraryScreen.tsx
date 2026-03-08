@@ -326,7 +326,7 @@ export default function LibraryScreen({ navigation }: Props) {
 
       return (
         <Pressable
-          onPress={() => openRoutineEditor(item.id)}
+          onPress={() => openPlayback(item.id)}
           style={({ pressed }) => [styles.routineCard, pressed ? styles.routineCardPressed : undefined]}
         >
           <View style={styles.routineHeader}>
@@ -359,18 +359,18 @@ export default function LibraryScreen({ navigation }: Props) {
           </Text>
           <View style={styles.routineActionsRow}>
             <Pressable
-              accessibilityLabel="Play routine"
+              accessibilityLabel="Edit routine"
               accessibilityRole="button"
               onPress={(event) => {
                 event.stopPropagation();
-                openPlayback(item.id);
+                openRoutineEditor(item.id);
               }}
               style={({ pressed }) => [
-                styles.playButton,
-                pressed ? styles.playButtonPressed : undefined,
+                styles.editButton,
+                pressed ? styles.editButtonPressed : undefined,
               ]}
             >
-              <Text style={styles.playButtonLabel}>Play</Text>
+              <Text style={styles.editButtonLabel}>Edit</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -603,16 +603,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
   },
-  playButton: {
+  editButton: {
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 6,
     backgroundColor: '#2E5BFF',
   },
-  playButtonPressed: {
+  editButtonPressed: {
     opacity: 0.8,
   },
-  playButtonLabel: {
+  editButtonLabel: {
     fontSize: 13,
     fontWeight: '700',
     color: '#FFFFFF',

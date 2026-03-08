@@ -1,5 +1,5 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -9,24 +9,40 @@ import {
   RoutineSettingsSection,
   TagInput,
 } from '../components/editor';
+import { DEFAULT_HEADS_UP_LEAD_TIME_MS, DEFAULT_ROUTINE_START_DELAY_MS } from '../constants';
 import type { RootStackParamList } from '../navigation/types';
-import { createRoutine, getRoutine, updateRoutine } from '../services';
-import type { CueActionType, CueInputMode, HeadsUpOverride, SoundId } from '../types';
-import { buildRoutineSavePayload, evaluateEditorDraft, toEditorCueTimeText } from '../utils';
+import { createRoutine, deleteRoutine, getRoutine, playSound, speakText, updateRoutine } from '../services';
+import type { CueActionType, HeadsUpOverride, SoundId } from '../types';
+import {
+  autoOrderCueDraftsByNormalizedElapsed,
+  buildCuePreviewCommands,
+  buildRoutineSavePayload,
+  createExpandedCueStateForAddedCue,
+  evaluateEditorDraft,
+  formatSettingsTimeInput,
+  getCollapsedCueTimeLabel,
+  isCuePreviewDisabled,
+  parseAndNormalizeCueOffsetMs,
+  parseCueTimeToMs,
+  toggleCueExpandedState,
+  toEditorCueTimeText,
+} from '../utils';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RoutineEditor'>;
 
 interface CueDraft {
   id: string;
   timeText: string;
-  inputMode: CueInputMode;
   actionType: CueActionType;
   ttsText: string;
   soundId: SoundId;
   headsUpOverride: HeadsUpOverride;
+  headsUpLeadTimeText: string;
 }
 
 const DEFAULT_SOUND_ID: SoundId = 'beep';
+const DEFAULT_START_DELAY_TEXT = toEditorCueTimeText(DEFAULT_ROUTINE_START_DELAY_MS);
+const DEFAULT_HEADS_UP_LEAD_TIME_TEXT = toEditorCueTimeText(DEFAULT_HEADS_UP_LEAD_TIME_MS);
 let cueDraftIdCounter = 0;
 
 function generateCueDraftId(): string {
@@ -38,13 +54,36 @@ function createDefaultCueDraft(overrides?: Partial<CueDraft>): CueDraft {
   return {
     id: overrides?.id ?? generateCueDraftId(),
     timeText: '00:00',
-    inputMode: 'elapsed',
     actionType: 'tts',
     ttsText: '',
     soundId: DEFAULT_SOUND_ID,
     headsUpOverride: 'inherit',
+    headsUpLeadTimeText: '',
     ...overrides,
   };
+}
+
+function createAddedCueDraft(): CueDraft {
+  return createDefaultCueDraft({
+    timeText: '',
+  });
+}
+
+function createInitialCueState(): { cueDrafts: CueDraft[]; expandedCueIds: Record<string, true> } {
+  const initialCue = createDefaultCueDraft();
+  return {
+    cueDrafts: [initialCue],
+    expandedCueIds: {
+      [initialCue.id]: true,
+    },
+  };
+}
+
+function autoOrderCueDrafts(cues: CueDraft[], routineDurationText: string): CueDraft[] {
+  return autoOrderCueDraftsByNormalizedElapsed({
+    cues,
+    routineDurationText,
+  });
 }
 
 function getErrorMessage(error: unknown): string {
@@ -55,31 +94,75 @@ function getErrorMessage(error: unknown): string {
   return 'Unknown error';
 }
 
+interface EditorSnapshotInput {
+  routineName: string;
+  tagsText: string;
+  favorite: boolean;
+  routineDurationText: string;
+  startDelayText: string;
+  headsUpEnabled: boolean;
+  headsUpLeadTimeText: string;
+  hapticsEnabled: boolean;
+  duckPlannedFlag: boolean;
+  cueDrafts: CueDraft[];
+}
+
+function createEditorSnapshot(input: EditorSnapshotInput): string {
+  return JSON.stringify({
+    routineName: input.routineName,
+    tagsText: input.tagsText,
+    favorite: input.favorite,
+    routineDurationText: input.routineDurationText,
+    startDelayText: input.startDelayText,
+    headsUpEnabled: input.headsUpEnabled,
+    headsUpLeadTimeText: input.headsUpLeadTimeText,
+    hapticsEnabled: input.hapticsEnabled,
+    duckPlannedFlag: input.duckPlannedFlag,
+    cueDrafts: input.cueDrafts,
+  });
+}
+
 export default function RoutineEditorScreen({ navigation, route }: Props) {
   const routineId = route.params?.routineId;
   const isEditMode = typeof routineId === 'string' && routineId.length > 0;
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const skipUnsavedPromptRef = useRef(false);
+  const initialCueState = useMemo(() => createInitialCueState(), []);
 
   const [routineName, setRoutineName] = useState('');
   const [tagsText, setTagsText] = useState('');
   const [favorite, setFavorite] = useState(false);
   const [routineDurationText, setRoutineDurationText] = useState('');
-  const [defaultHeadsUpEnabled, setDefaultHeadsUpEnabled] = useState(true);
+  const [startDelayText, setStartDelayText] = useState(DEFAULT_START_DELAY_TEXT);
+  const [headsUpEnabled, setHeadsUpEnabled] = useState(true);
+  const [headsUpLeadTimeText, setHeadsUpLeadTimeText] = useState(DEFAULT_HEADS_UP_LEAD_TIME_TEXT);
   const [hapticsEnabled, setHapticsEnabled] = useState(false);
   const [duckPlannedFlag, setDuckPlannedFlag] = useState(false);
-  const [cueDrafts, setCueDrafts] = useState<CueDraft[]>([createDefaultCueDraft()]);
+  const [cueDrafts, setCueDrafts] = useState<CueDraft[]>(initialCueState.cueDrafts);
+  const [expandedCueIds, setExpandedCueIds] = useState<Record<string, true>>(
+    initialCueState.expandedCueIds
+  );
+  const [previewingCueId, setPreviewingCueId] = useState<string | null>(null);
+  const [pendingAddedCueId, setPendingAddedCueId] = useState<string | null>(null);
+  const [cueRowLayoutYById, setCueRowLayoutYById] = useState<Record<string, number>>({});
   const [isHydrating, setIsHydrating] = useState(isEditMode);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+  const [savedEditorSnapshot, setSavedEditorSnapshot] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isEditMode || !routineId) {
       setIsHydrating(false);
+      setPendingAddedCueId(null);
+      setSavedEditorSnapshot(null);
       return;
     }
 
     let isActive = true;
     setIsHydrating(true);
     setSaveErrorMessage(null);
+    setSavedEditorSnapshot(null);
 
     void (async () => {
       try {
@@ -98,29 +181,55 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
           return;
         }
 
-        setRoutineName(existingRoutine.name);
-        setTagsText(existingRoutine.tags.join(', '));
-        setFavorite(existingRoutine.favorite);
-        setRoutineDurationText(toEditorCueTimeText(existingRoutine.routineDurationMs, 'elapsed', 0));
-        setDefaultHeadsUpEnabled(existingRoutine.defaultHeadsUpEnabled);
-        setHapticsEnabled(existingRoutine.hapticsEnabled);
-        setDuckPlannedFlag(existingRoutine.duckPlannedFlag);
-        setCueDrafts(
+        const hydratedRoutineDurationText = toEditorCueTimeText(
+          existingRoutine.routineDurationMs
+        );
+        const hydratedCueDrafts = autoOrderCueDrafts(
           existingRoutine.cues.map((cue) =>
             createDefaultCueDraft({
               id: cue.id,
-              timeText: toEditorCueTimeText(
-                cue.offsetMs,
-                cue.inputMode,
-                existingRoutine.routineDurationMs
-              ),
-              inputMode: cue.inputMode,
+              timeText: toEditorCueTimeText(cue.offsetMs),
               actionType: cue.actionType,
               ttsText: cue.ttsText ?? '',
               soundId: cue.soundId ?? DEFAULT_SOUND_ID,
               headsUpOverride: cue.headsUpOverride,
+              headsUpLeadTimeText:
+                cue.headsUpLeadTimeMs !== undefined
+                  ? toEditorCueTimeText(cue.headsUpLeadTimeMs)
+                  : '',
             })
-          )
+          ),
+          hydratedRoutineDurationText
+        );
+        const hydratedStartDelayText = toEditorCueTimeText(existingRoutine.startDelayMs);
+        const hydratedHeadsUpLeadTimeText = toEditorCueTimeText(existingRoutine.headsUpLeadTimeMs);
+
+        setRoutineName(existingRoutine.name);
+        setTagsText(existingRoutine.tags.join(', '));
+        setFavorite(existingRoutine.favorite);
+        setRoutineDurationText(hydratedRoutineDurationText);
+        setStartDelayText(hydratedStartDelayText);
+        setHeadsUpEnabled(existingRoutine.headsUpEnabled);
+        setHeadsUpLeadTimeText(hydratedHeadsUpLeadTimeText);
+        setHapticsEnabled(existingRoutine.hapticsEnabled);
+        setDuckPlannedFlag(existingRoutine.duckPlannedFlag);
+        setPendingAddedCueId(null);
+        setCueRowLayoutYById({});
+        setExpandedCueIds({});
+        setCueDrafts(hydratedCueDrafts);
+        setSavedEditorSnapshot(
+          createEditorSnapshot({
+            routineName: existingRoutine.name,
+            tagsText: existingRoutine.tags.join(', '),
+            favorite: existingRoutine.favorite,
+            routineDurationText: hydratedRoutineDurationText,
+            startDelayText: hydratedStartDelayText,
+            headsUpEnabled: existingRoutine.headsUpEnabled,
+            headsUpLeadTimeText: hydratedHeadsUpLeadTimeText,
+            hapticsEnabled: existingRoutine.hapticsEnabled,
+            duckPlannedFlag: existingRoutine.duckPlannedFlag,
+            cueDrafts: hydratedCueDrafts,
+          })
         );
       } catch (error: unknown) {
         if (!isActive) {
@@ -149,9 +258,12 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
     () =>
       evaluateEditorDraft({
         routineDurationText,
+        startDelayText,
+        headsUpEnabled,
+        headsUpLeadTimeText,
         cues: cueDrafts,
       }),
-    [cueDrafts, routineDurationText]
+    [cueDrafts, headsUpEnabled, headsUpLeadTimeText, routineDurationText, startDelayText]
   );
 
   const saveMessages = useMemo(() => {
@@ -163,7 +275,44 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
     return messages;
   }, [editorEvaluation.issues.routineMessages, saveErrorMessage]);
 
-  const isBusy = isHydrating || isSaving;
+  const currentEditorSnapshot = useMemo(
+    () =>
+      createEditorSnapshot({
+        routineName,
+        tagsText,
+        favorite,
+        routineDurationText,
+        startDelayText,
+        headsUpEnabled,
+        headsUpLeadTimeText,
+        hapticsEnabled,
+        duckPlannedFlag,
+        cueDrafts,
+      }),
+    [
+      cueDrafts,
+      duckPlannedFlag,
+      favorite,
+      hapticsEnabled,
+      headsUpEnabled,
+      headsUpLeadTimeText,
+      routineDurationText,
+      routineName,
+      startDelayText,
+      tagsText,
+    ]
+  );
+
+  useEffect(() => {
+    if (!isHydrating && savedEditorSnapshot === null) {
+      setSavedEditorSnapshot(currentEditorSnapshot);
+    }
+  }, [currentEditorSnapshot, isHydrating, savedEditorSnapshot]);
+
+  const hasUnsavedChanges =
+    !isHydrating && savedEditorSnapshot !== null && currentEditorSnapshot !== savedEditorSnapshot;
+
+  const isBusy = isHydrating || isSaving || isDeleting;
   const isSaveDisabled = isBusy || editorEvaluation.issues.hasErrors;
   const canPlaySavedRoutine = isEditMode && Boolean(routineId) && !isBusy;
 
@@ -171,81 +320,216 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
     ? 'Resolve errors before saving.'
     : editorEvaluation.issues.hasWarnings
       ? 'Warnings found. Save is still allowed.'
+      : isDeleting
+        ? 'Deleting...'
       : isSaving
         ? 'Saving...'
         : 'Ready to save.';
 
-  const updateCueDraftField = useCallback(
-    <K extends keyof CueDraft>(cueId: string, field: K, value: CueDraft[K]) => {
-      setSaveErrorMessage(null);
-      setCueDrafts((previousCues) =>
-        previousCues.map((cue) => (cue.id === cueId ? { ...cue, [field]: value } : cue))
-      );
-    },
-    []
-  );
-
-  const moveCue = useCallback((cueIndex: number, direction: -1 | 1) => {
-    setSaveErrorMessage(null);
-    setCueDrafts((previousCues) => {
-      const targetIndex = cueIndex + direction;
-      if (cueIndex < 0 || cueIndex >= previousCues.length) {
-        return previousCues;
+  const updateCueRowLayoutY = useCallback((cueId: string, layoutY: number) => {
+    setCueRowLayoutYById((previousLayoutYById) => {
+      if (previousLayoutYById[cueId] === layoutY) {
+        return previousLayoutYById;
       }
 
-      if (targetIndex < 0 || targetIndex >= previousCues.length) {
-        return previousCues;
-      }
-
-      const nextCues = [...previousCues];
-      const [cueToMove] = nextCues.splice(cueIndex, 1);
-      nextCues.splice(targetIndex, 0, cueToMove);
-      return nextCues;
+      return {
+        ...previousLayoutYById,
+        [cueId]: layoutY,
+      };
     });
   }, []);
 
-  const duplicateCue = useCallback((cueIndex: number) => {
+  const updateCueDraftField = useCallback(
+    <K extends keyof CueDraft>(cueId: string, field: K, value: CueDraft[K]) => {
+      setSaveErrorMessage(null);
+      const nextFieldValue =
+        (field === 'timeText' || field === 'headsUpLeadTimeText') && typeof value === 'string'
+          ? (formatSettingsTimeInput(value) as CueDraft[K])
+          : value;
+      setCueDrafts((previousCues) => {
+        const nextCues = previousCues.map((cue) =>
+          cue.id === cueId ? { ...cue, [field]: nextFieldValue } : cue
+        );
+
+        if (field !== 'timeText') {
+          return nextCues;
+        }
+
+        return autoOrderCueDrafts(nextCues, routineDurationText);
+      });
+    },
+    [routineDurationText]
+  );
+
+  const handleCueHeadsUpOverrideChange = useCallback(
+    (cueId: string, value: HeadsUpOverride) => {
+      setSaveErrorMessage(null);
+      setCueDrafts((previousCues) =>
+        previousCues.map((cue) => {
+          if (cue.id !== cueId) {
+            return cue;
+          }
+
+          if (value !== 'on') {
+            return {
+              ...cue,
+              headsUpOverride: value,
+            };
+          }
+
+          return {
+            ...cue,
+            headsUpOverride: value,
+            headsUpLeadTimeText:
+              cue.headsUpLeadTimeText.trim().length > 0
+                ? cue.headsUpLeadTimeText
+                : headsUpLeadTimeText,
+          };
+        })
+      );
+    },
+    [headsUpLeadTimeText]
+  );
+
+  useEffect(() => {
+    if (!pendingAddedCueId) {
+      return;
+    }
+
+    const pendingCue = cueDrafts.find((cue) => cue.id === pendingAddedCueId);
+    if (!pendingCue) {
+      setPendingAddedCueId(null);
+      return;
+    }
+
+    const parsedRoutineDuration = parseCueTimeToMs(routineDurationText);
+    const normalizedPendingCueOffset = parseAndNormalizeCueOffsetMs({
+      input: pendingCue.timeText,
+      routineDurationMs: parsedRoutineDuration.ok ? parsedRoutineDuration.value : undefined,
+    });
+
+    if (!normalizedPendingCueOffset.ok) {
+      return;
+    }
+
+    const cueRowY = cueRowLayoutYById[pendingAddedCueId];
+    if (typeof cueRowY !== 'number') {
+      return;
+    }
+
+    scrollViewRef.current?.scrollTo({
+      y: Math.max(0, cueRowY - 16),
+      animated: true,
+    });
+    setPendingAddedCueId(null);
+  }, [cueDrafts, cueRowLayoutYById, pendingAddedCueId, routineDurationText]);
+
+  const duplicateCue = useCallback((cueId: string) => {
     setSaveErrorMessage(null);
     setCueDrafts((previousCues) => {
-      if (cueIndex < 0 || cueIndex >= previousCues.length) {
+      const cueIndex = previousCues.findIndex((cue) => cue.id === cueId);
+      if (cueIndex < 0) {
         return previousCues;
       }
 
       const sourceCue = previousCues[cueIndex];
       const duplicatedCue = createDefaultCueDraft({
         timeText: sourceCue.timeText,
-        inputMode: sourceCue.inputMode,
         actionType: sourceCue.actionType,
         ttsText: sourceCue.ttsText,
         soundId: sourceCue.soundId,
         headsUpOverride: sourceCue.headsUpOverride,
+        headsUpLeadTimeText: sourceCue.headsUpLeadTimeText,
       });
 
       const nextCues = [...previousCues];
       nextCues.splice(cueIndex + 1, 0, duplicatedCue);
-      return nextCues;
+      return autoOrderCueDrafts(nextCues, routineDurationText);
     });
-  }, []);
+  }, [routineDurationText]);
 
-  const deleteCue = useCallback((cueIndex: number) => {
+  const deleteCue = useCallback((cueId: string) => {
     setSaveErrorMessage(null);
-    setCueDrafts((previousCues) => {
-      if (cueIndex < 0 || cueIndex >= previousCues.length) {
-        return previousCues;
+    setCueDrafts((previousCues) => previousCues.filter((cue) => cue.id !== cueId));
+    setExpandedCueIds((previousExpandedCueIds) => {
+      if (!(cueId in previousExpandedCueIds)) {
+        return previousExpandedCueIds;
       }
 
-      return previousCues.filter((_, index) => index !== cueIndex);
+      const nextExpandedCueIds = { ...previousExpandedCueIds };
+      delete nextExpandedCueIds[cueId];
+      return nextExpandedCueIds;
     });
+    setCueRowLayoutYById((previousLayoutYById) => {
+      if (!(cueId in previousLayoutYById)) {
+        return previousLayoutYById;
+      }
+
+      const nextLayoutYById = { ...previousLayoutYById };
+      delete nextLayoutYById[cueId];
+      return nextLayoutYById;
+    });
+    setPendingAddedCueId((activeCueId) => (activeCueId === cueId ? null : activeCueId));
   }, []);
 
   const addCue = useCallback(() => {
     setSaveErrorMessage(null);
-    setCueDrafts((previousCues) => [...previousCues, createDefaultCueDraft()]);
+    const addedCue = createAddedCueDraft();
+    setPendingAddedCueId(addedCue.id);
+    setExpandedCueIds(createExpandedCueStateForAddedCue(addedCue.id));
+    setCueDrafts((previousCues) =>
+      autoOrderCueDrafts([...previousCues, addedCue], routineDurationText)
+    );
+  }, [routineDurationText]);
+
+  const toggleCueCollapsed = useCallback((cueId: string) => {
+    setExpandedCueIds((previousExpandedCueIds) =>
+      toggleCueExpandedState(previousExpandedCueIds, cueId)
+    );
   }, []);
 
-  const handleSave = useCallback(async () => {
-    if (isSaveDisabled || editorEvaluation.routineDurationMs === null) {
-      return;
+  const previewCue = useCallback(
+    async (cue: CueDraft) => {
+      if (isBusy || previewingCueId !== null) {
+        return;
+      }
+
+      const commands = buildCuePreviewCommands({
+        actionType: cue.actionType,
+        ttsText: cue.ttsText,
+        soundId: cue.soundId,
+      });
+
+      if (commands.length === 0) {
+        return;
+      }
+
+      setPreviewingCueId(cue.id);
+      try {
+        for (const command of commands) {
+          if (command.type === 'sound') {
+            await playSound(command.soundId);
+          } else {
+            await speakText(command.text);
+          }
+        }
+      } catch {
+        // Preview should not block editing if media APIs fail.
+      } finally {
+        setPreviewingCueId((activeCueId) => (activeCueId === cue.id ? null : activeCueId));
+      }
+    },
+    [isBusy, previewingCueId]
+  );
+
+  const persistRoutine = useCallback(async (): Promise<boolean> => {
+    if (
+      isSaveDisabled ||
+      editorEvaluation.routineDurationMs === null ||
+      editorEvaluation.startDelayMs === null ||
+      editorEvaluation.headsUpLeadTimeMs === null
+    ) {
+      return false;
     }
 
     setSaveErrorMessage(null);
@@ -259,7 +543,9 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
         tagsText,
         favorite,
         routineDurationMs: editorEvaluation.routineDurationMs,
-        defaultHeadsUpEnabled,
+        startDelayMs: editorEvaluation.startDelayMs,
+        headsUpEnabled,
+        headsUpLeadTimeMs: editorEvaluation.headsUpLeadTimeMs,
         hapticsEnabled,
         duckPlannedFlag,
         normalizedCues: editorEvaluation.normalizedCues,
@@ -271,29 +557,141 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
         await updateRoutine(payload.routine);
       }
 
+      setSavedEditorSnapshot(currentEditorSnapshot);
+      return true;
+    } catch (error: unknown) {
+      setSaveErrorMessage(`Could not save routine. ${getErrorMessage(error)}`);
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [
+    currentEditorSnapshot,
+    headsUpEnabled,
+    duckPlannedFlag,
+    editorEvaluation.headsUpLeadTimeMs,
+    editorEvaluation.normalizedCues,
+    editorEvaluation.routineDurationMs,
+    editorEvaluation.startDelayMs,
+    favorite,
+    hapticsEnabled,
+    isEditMode,
+    isSaveDisabled,
+    routineId,
+    routineName,
+    tagsText,
+  ]);
+
+  const completeNavigationWithoutPrompt = useCallback(
+    (action: () => void) => {
+      skipUnsavedPromptRef.current = true;
+      action();
+      setTimeout(() => {
+        skipUnsavedPromptRef.current = false;
+      }, 0);
+    },
+    []
+  );
+
+  const handleSave = useCallback(async () => {
+    const saved = await persistRoutine();
+    if (!saved) {
+      return;
+    }
+
+    completeNavigationWithoutPrompt(() => {
       if (navigation.canGoBack()) {
         navigation.goBack();
       } else {
         navigation.navigate('Library');
       }
-    } catch (error: unknown) {
-      setSaveErrorMessage(`Could not save routine. ${getErrorMessage(error)}`);
-    } finally {
-      setIsSaving(false);
+    });
+  }, [completeNavigationWithoutPrompt, navigation, persistRoutine]);
+
+  const handleDeleteRoutine = useCallback(() => {
+    if (!isEditMode || !routineId || isBusy) {
+      return;
     }
+
+    Alert.alert('Delete routine?', 'This will permanently delete this routine.', [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setSaveErrorMessage(null);
+            setIsDeleting(true);
+            try {
+              const deleted = await deleteRoutine(routineId);
+              if (!deleted) {
+                throw new Error('Routine not found.');
+              }
+
+              completeNavigationWithoutPrompt(() => {
+                navigation.navigate('Library');
+              });
+            } catch (error: unknown) {
+              setSaveErrorMessage(`Could not delete routine. ${getErrorMessage(error)}`);
+            } finally {
+              setIsDeleting(false);
+            }
+          })();
+        },
+      },
+    ]);
+  }, [completeNavigationWithoutPrompt, isBusy, isEditMode, navigation, routineId]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+      if (!hasUnsavedChanges || isBusy || skipUnsavedPromptRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+
+      Alert.alert('Unsaved changes', 'Save changes before leaving this routine?', [
+        {
+          text: 'Save',
+          onPress: () => {
+            void (async () => {
+              const saved = await persistRoutine();
+              if (!saved) {
+                return;
+              }
+
+              completeNavigationWithoutPrompt(() => {
+                navigation.dispatch(event.data.action);
+              });
+            })();
+          },
+        },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => {
+            completeNavigationWithoutPrompt(() => {
+              navigation.dispatch(event.data.action);
+            });
+          },
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ]);
+    });
+
+    return unsubscribe;
   }, [
-    defaultHeadsUpEnabled,
-    duckPlannedFlag,
-    editorEvaluation.normalizedCues,
-    editorEvaluation.routineDurationMs,
-    favorite,
-    hapticsEnabled,
-    isEditMode,
-    isSaveDisabled,
+    completeNavigationWithoutPrompt,
+    hasUnsavedChanges,
+    isBusy,
     navigation,
-    routineId,
-    routineName,
-    tagsText,
+    persistRoutine,
   ]);
 
   const handlePlaySavedRoutine = useCallback(() => {
@@ -306,6 +704,7 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
 
   return (
     <ScrollView
+      ref={scrollViewRef}
       contentContainerStyle={styles.contentContainer}
       keyboardShouldPersistTaps="handled"
       style={styles.container}
@@ -346,12 +745,27 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
         durationText={routineDurationText}
         onDurationTextChange={(value) => {
           setSaveErrorMessage(null);
-          setRoutineDurationText(value);
+          const formattedValue = formatSettingsTimeInput(value);
+          setRoutineDurationText(formattedValue);
+          setCueDrafts((previousCues) => autoOrderCueDrafts(previousCues, formattedValue));
         }}
-        defaultHeadsUpEnabled={defaultHeadsUpEnabled}
-        onDefaultHeadsUpEnabledChange={(value) => {
+        startDelayText={startDelayText}
+        onStartDelayTextChange={(value) => {
           setSaveErrorMessage(null);
-          setDefaultHeadsUpEnabled(value);
+          setStartDelayText(formatSettingsTimeInput(value));
+        }}
+        headsUpEnabled={headsUpEnabled}
+        onHeadsUpEnabledChange={(value) => {
+          setSaveErrorMessage(null);
+          setHeadsUpEnabled(value);
+          if (value) {
+            setHeadsUpLeadTimeText(DEFAULT_HEADS_UP_LEAD_TIME_TEXT);
+          }
+        }}
+        headsUpLeadTimeText={headsUpLeadTimeText}
+        onHeadsUpLeadTimeTextChange={(value) => {
+          setSaveErrorMessage(null);
+          setHeadsUpLeadTimeText(formatSettingsTimeInput(value));
         }}
         hapticsEnabled={hapticsEnabled}
         onHapticsEnabledChange={(value) => {
@@ -365,9 +779,19 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
         }}
         durationErrorText={editorEvaluation.issues.durationErrorText}
         durationHelperText={
-          editorEvaluation.issues.durationErrorText
+          editorEvaluation.issues.durationErrorText ? undefined : 'Required.'
+        }
+        startDelayErrorText={editorEvaluation.issues.startDelayErrorText}
+        startDelayHelperText={
+          editorEvaluation.issues.startDelayErrorText
             ? undefined
-            : 'Required before using countdown cue times.'
+            : 'Delay before playback timeline begins.'
+        }
+        headsUpLeadTimeErrorText={editorEvaluation.issues.headsUpLeadTimeErrorText}
+        headsUpLeadTimeHelperText={
+          editorEvaluation.issues.headsUpLeadTimeErrorText
+            ? undefined
+            : 'Ping lead time before each cue when heads-up is enabled.'
         }
         disabled={isBusy}
       />
@@ -388,32 +812,48 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
               <CueRowEditor
                 key={cue.id}
                 cueLabel={`Cue ${index + 1}`}
+                collapsedTimeLabel={getCollapsedCueTimeLabel(cue.timeText)}
+                collapsed={!expandedCueIds[cue.id]}
+                onToggleCollapsed={() => toggleCueCollapsed(cue.id)}
                 timeText={cue.timeText}
-                inputMode={cue.inputMode}
                 actionType={cue.actionType}
                 ttsText={cue.ttsText}
                 soundId={cue.soundId}
                 headsUpOverride={cue.headsUpOverride}
+                headsUpLeadTimeText={cue.headsUpLeadTimeText}
                 onTimeTextChange={(value) => updateCueDraftField(cue.id, 'timeText', value)}
-                onInputModeChange={(value) => updateCueDraftField(cue.id, 'inputMode', value)}
                 onActionTypeChange={(value) => updateCueDraftField(cue.id, 'actionType', value)}
                 onTtsTextChange={(value) => updateCueDraftField(cue.id, 'ttsText', value)}
                 onSoundIdChange={(value) => updateCueDraftField(cue.id, 'soundId', value)}
-                onHeadsUpOverrideChange={(value) =>
-                  updateCueDraftField(cue.id, 'headsUpOverride', value)
+                onHeadsUpOverrideChange={(value) => handleCueHeadsUpOverrideChange(cue.id, value)}
+                onHeadsUpLeadTimeTextChange={(value) =>
+                  updateCueDraftField(cue.id, 'headsUpLeadTimeText', value)
                 }
-                onMoveUp={() => moveCue(index, -1)}
-                onMoveDown={() => moveCue(index, 1)}
-                onDuplicate={() => duplicateCue(index)}
-                onDelete={() => deleteCue(index)}
-                disableMoveUp={index === 0}
-                disableMoveDown={index === cueDrafts.length - 1}
+                onPreview={() => void previewCue(cue)}
+                onDuplicate={() => duplicateCue(cue.id)}
+                onDelete={() => deleteCue(cue.id)}
+                previewDisabled={
+                  isBusy ||
+                  previewingCueId !== null ||
+                  isCuePreviewDisabled(cue.actionType, cue.ttsText)
+                }
+                previewLoading={previewingCueId === cue.id}
+                cueTimeAutoFocus={pendingAddedCueId === cue.id}
+                onLayout={(event) => updateCueRowLayoutY(cue.id, event.nativeEvent.layout.y)}
                 disabled={isBusy}
                 timeErrorText={editorEvaluation.issues.cueTimeErrorById[cue.id]}
                 timeHelperText={
                   editorEvaluation.issues.cueTimeErrorById[cue.id]
                     ? undefined
                     : editorEvaluation.issues.cueTimeWarningById[cue.id]
+                }
+                headsUpLeadTimeErrorText={
+                  editorEvaluation.issues.cueHeadsUpLeadTimeErrorById[cue.id]
+                }
+                headsUpLeadTimeHelperText={
+                  editorEvaluation.issues.cueHeadsUpLeadTimeErrorById[cue.id]
+                    ? undefined
+                    : 'Overrides routine heads-up lead time for this cue.'
                 }
               />
             ))}
@@ -459,6 +899,25 @@ export default function RoutineEditorScreen({ navigation, route }: Props) {
             {isSaving ? 'Saving...' : isEditMode ? 'Save Changes' : 'Save Routine'}
           </Text>
         </Pressable>
+        {isEditMode ? (
+          <Pressable
+            disabled={isBusy}
+            onPress={handleDeleteRoutine}
+            style={[
+              styles.deleteRoutineButton,
+              isBusy ? styles.deleteRoutineButtonDisabled : styles.deleteRoutineButtonEnabled,
+            ]}
+          >
+            <Text
+              style={[
+                styles.deleteRoutineButtonLabel,
+                isBusy ? styles.deleteRoutineButtonLabelDisabled : styles.deleteRoutineButtonLabelEnabled,
+              ]}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete Routine'}
+            </Text>
+          </Pressable>
+        ) : null}
         <Text style={styles.saveHelperText}>{saveHelperText}</Text>
         {isHydrating ? (
           <View style={styles.loadingRow}>
@@ -579,6 +1038,31 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 12,
     color: '#666666',
+  },
+  deleteRoutineButton: {
+    marginTop: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  deleteRoutineButtonEnabled: {
+    borderColor: '#C62828',
+    backgroundColor: '#FFEAEA',
+  },
+  deleteRoutineButtonDisabled: {
+    borderColor: '#D8D8D8',
+    backgroundColor: '#F5F5F5',
+  },
+  deleteRoutineButtonLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  deleteRoutineButtonLabelEnabled: {
+    color: '#B00020',
+  },
+  deleteRoutineButtonLabelDisabled: {
+    color: '#8A8A8A',
   },
   saveButton: {
     borderRadius: 10,

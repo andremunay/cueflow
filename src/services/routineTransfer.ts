@@ -13,39 +13,16 @@ export interface ParsedRoutineImportResult {
   warnings: ValidationIssue[];
 }
 
-function getElapsedOutOfBoundsIssues(routine: Routine): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-
-  routine.cues.forEach((cue, index) => {
-    if (cue.inputMode !== 'elapsed') {
-      return;
-    }
-
-    if (cue.offsetMs > routine.routineDurationMs) {
-      issues.push({
-        severity: 'error',
-        code: 'INVALID_COUNTDOWN_CONVERSION',
-        message: `Elapsed cue offset must be within [0, ${routine.routineDurationMs}] milliseconds.`,
-        path: `cues[${index}].offsetMs`,
-      });
-    }
-  });
-
-  return issues;
-}
-
 function buildValidationIssuesForImport(routine: Routine): ValidationIssue[] {
   const validationResult = validateRoutine({
     routineDurationMs: routine.routineDurationMs,
     cues: routine.cues.map((cue) => ({
       id: cue.id,
       offsetMs: cue.offsetMs,
-      inputMode: cue.inputMode,
     })),
   });
 
-  const elapsedOutOfBoundsIssues = getElapsedOutOfBoundsIssues(routine);
-  const allValidationIssues = [...validationResult.issues, ...elapsedOutOfBoundsIssues];
+  const allValidationIssues = [...validationResult.issues];
   const hasErrors = allValidationIssues.some((issue) => issue.severity === 'error');
 
   if (hasErrors) {

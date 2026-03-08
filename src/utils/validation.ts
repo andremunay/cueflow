@@ -1,12 +1,11 @@
 import { MAX_CUE_COUNT, MAX_ROUTINE_DURATION_MS } from '../constants';
-import type { CueInputMode, ValidationIssue, ValidationResult } from '../types';
+import type { ValidationIssue, ValidationResult } from '../types';
 
 export const OVERLAP_WARNING_GAP_MS = 3_000;
 
 export interface RoutineValidationCueInput {
   id: string;
   offsetMs: number;
-  inputMode: CueInputMode;
 }
 
 export interface RoutineValidationInput {
@@ -97,6 +96,28 @@ function collectNegativeTimeIssues(
   });
 }
 
+function collectCueOutsideDurationIssues(
+  issues: ValidationIssue[],
+  cues: RoutineValidationCueInput[],
+  routineDurationMs: number | null
+): void {
+  if (routineDurationMs === null) {
+    return;
+  }
+
+  cues.forEach((cue, index) => {
+    if (cue.offsetMs > routineDurationMs) {
+      issues.push(
+        createErrorIssue(
+          'CUE_OUTSIDE_DURATION',
+          `Cue time must be within [0, ${routineDurationMs}] milliseconds.`,
+          `cues[${index}].offsetMs`
+        )
+      );
+    }
+  });
+}
+
 function collectDuplicateTimestampIssues(
   issues: ValidationIssue[],
   cues: RoutineValidationCueInput[]
@@ -116,33 +137,6 @@ function collectDuplicateTimestampIssues(
     }
 
     seenOffsets.add(cue.offsetMs);
-  });
-}
-
-function collectCountdownConversionIssues(
-  issues: ValidationIssue[],
-  cues: RoutineValidationCueInput[],
-  durationMs: number | null,
-  hasValidDuration: boolean
-): void {
-  if (!hasValidDuration || durationMs === null) {
-    return;
-  }
-
-  cues.forEach((cue, index) => {
-    if (cue.inputMode !== 'countdown') {
-      return;
-    }
-
-    if (cue.offsetMs < 0 || cue.offsetMs > durationMs) {
-      issues.push(
-        createErrorIssue(
-          'INVALID_COUNTDOWN_CONVERSION',
-          `Countdown cue offset must be within [0, ${durationMs}] milliseconds.`,
-          `cues[${index}].offsetMs`
-        )
-      );
-    }
   });
 }
 
@@ -196,12 +190,16 @@ function collectOverlapIssues(issues: ValidationIssue[], cues: RoutineValidation
 
 export function validateRoutine(input: RoutineValidationInput): ValidationResult {
   const issues: ValidationIssue[] = [];
-  const { hasValidDuration, durationMs } = collectDurationIssues(issues, input.routineDurationMs);
+  const durationResult = collectDurationIssues(issues, input.routineDurationMs);
 
   collectCueCountIssue(issues, input.cues);
   collectNegativeTimeIssues(issues, input.cues);
+  collectCueOutsideDurationIssues(
+    issues,
+    input.cues,
+    durationResult.hasValidDuration ? durationResult.durationMs : null
+  );
   collectDuplicateTimestampIssues(issues, input.cues);
-  collectCountdownConversionIssues(issues, input.cues, durationMs, hasValidDuration);
   collectOutOfOrderIssues(issues, input.cues);
   collectOverlapIssues(issues, input.cues);
 

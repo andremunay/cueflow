@@ -1,7 +1,7 @@
+import { MAX_ROUTINE_DURATION_MS } from '../constants';
 import type {
   Cue,
   CueActionType,
-  CueInputMode,
   HeadsUpOverride,
   Routine,
   RoutineExportWrapper,
@@ -11,17 +11,54 @@ import { RoutineTransferError } from './routineTransferErrors';
 
 export const ROUTINE_EXPORT_VERSION = 1 as const;
 
-const VALID_INPUT_MODES: readonly CueInputMode[] = ['elapsed', 'countdown'];
 const VALID_ACTION_TYPES: readonly CueActionType[] = ['tts', 'sound', 'combo'];
 const VALID_HEADS_UP_OVERRIDES: readonly HeadsUpOverride[] = ['inherit', 'off', 'on'];
 const VALID_SOUND_IDS: readonly SoundId[] = ['beep', 'chime', 'whistle'];
+const WRAPPER_KEYS = new Set<string>(['version', 'routine']);
+const ROUTINE_KEYS = new Set<string>([
+  'id',
+  'name',
+  'tags',
+  'favorite',
+  'routineDurationMs',
+  'startDelayMs',
+  'headsUpEnabled',
+  'headsUpLeadTimeMs',
+  'hapticsEnabled',
+  'duckPlannedFlag',
+  'cues',
+]);
+const CUE_KEYS = new Set<string>([
+  'id',
+  'offsetMs',
+  'actionType',
+  'ttsText',
+  'soundId',
+  'headsUpOverride',
+  'headsUpLeadTimeMs',
+]);
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function hasOnlyAllowedKeys(
+  value: Record<string, unknown>,
+  allowedKeys: Set<string>
+): boolean {
+  return Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
+function hasRequiredKeys(value: Record<string, unknown>, requiredKeys: readonly string[]): boolean {
+  return requiredKeys.every((requiredKey) => Object.prototype.hasOwnProperty.call(value, requiredKey));
+}
+
 function isFiniteInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value);
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return isFiniteInteger(value) && value >= 0;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -37,19 +74,23 @@ function isCue(value: unknown): value is Cue {
     return false;
   }
 
-  const inputMode = value.inputMode;
-  const actionType = value.actionType;
-  const headsUpOverride = value.headsUpOverride;
-  const soundId = value.soundId;
+  if (
+    !hasOnlyAllowedKeys(value, CUE_KEYS) ||
+    !hasRequiredKeys(value, ['id', 'offsetMs', 'actionType', 'headsUpOverride'])
+  ) {
+    return false;
+  }
 
   return (
     typeof value.id === 'string' &&
-    isFiniteInteger(value.offsetMs) &&
-    VALID_INPUT_MODES.includes(inputMode as CueInputMode) &&
-    VALID_ACTION_TYPES.includes(actionType as CueActionType) &&
-    VALID_HEADS_UP_OVERRIDES.includes(headsUpOverride as HeadsUpOverride) &&
+    isNonNegativeInteger(value.offsetMs) &&
+    VALID_ACTION_TYPES.includes(value.actionType as CueActionType) &&
+    VALID_HEADS_UP_OVERRIDES.includes(value.headsUpOverride as HeadsUpOverride) &&
+    (value.headsUpLeadTimeMs === undefined ||
+      (isNonNegativeInteger(value.headsUpLeadTimeMs) &&
+        value.headsUpLeadTimeMs <= MAX_ROUTINE_DURATION_MS)) &&
     isOptionalString(value.ttsText) &&
-    (soundId === undefined || VALID_SOUND_IDS.includes(soundId as SoundId))
+    (value.soundId === undefined || VALID_SOUND_IDS.includes(value.soundId as SoundId))
   );
 }
 
@@ -58,30 +99,41 @@ function isRoutine(value: unknown): value is Routine {
     return false;
   }
 
+  if (
+    !hasOnlyAllowedKeys(value, ROUTINE_KEYS) ||
+    !hasRequiredKeys(value, [
+      'id',
+      'name',
+      'tags',
+      'favorite',
+      'routineDurationMs',
+      'startDelayMs',
+      'headsUpEnabled',
+      'headsUpLeadTimeMs',
+      'hapticsEnabled',
+      'duckPlannedFlag',
+      'cues',
+    ])
+  ) {
+    return false;
+  }
+
   return (
     typeof value.id === 'string' &&
     typeof value.name === 'string' &&
     isStringArray(value.tags) &&
     typeof value.favorite === 'boolean' &&
-    isFiniteInteger(value.routineDurationMs) &&
-    typeof value.defaultHeadsUpEnabled === 'boolean' &&
+    isNonNegativeInteger(value.routineDurationMs) &&
+    isNonNegativeInteger(value.startDelayMs) &&
+    value.startDelayMs <= MAX_ROUTINE_DURATION_MS &&
+    typeof value.headsUpEnabled === 'boolean' &&
+    isNonNegativeInteger(value.headsUpLeadTimeMs) &&
+    value.headsUpLeadTimeMs <= MAX_ROUTINE_DURATION_MS &&
     typeof value.hapticsEnabled === 'boolean' &&
     typeof value.duckPlannedFlag === 'boolean' &&
     Array.isArray(value.cues) &&
     value.cues.every((cue) => isCue(cue))
   );
-}
-
-function cloneCue(cue: Cue): Cue {
-  return { ...cue };
-}
-
-function cloneRoutine(routine: Routine): Routine {
-  return {
-    ...routine,
-    tags: [...routine.tags],
-    cues: routine.cues.map((cue) => cloneCue(cue)),
-  };
 }
 
 function hasUniqueCueIds(routine: Routine): boolean {
@@ -98,7 +150,64 @@ function hasUniqueCueIds(routine: Routine): boolean {
   return true;
 }
 
+function cloneCue(cue: Cue): Cue {
+  const clonedCue: Cue = {
+    id: cue.id,
+    offsetMs: cue.offsetMs,
+    actionType: cue.actionType,
+    headsUpOverride: cue.headsUpOverride,
+  };
+
+  if (cue.ttsText !== undefined) {
+    clonedCue.ttsText = cue.ttsText;
+  }
+
+  if (cue.soundId !== undefined) {
+    clonedCue.soundId = cue.soundId;
+  }
+
+  if (cue.headsUpLeadTimeMs !== undefined) {
+    clonedCue.headsUpLeadTimeMs = cue.headsUpLeadTimeMs;
+  }
+
+  return clonedCue;
+}
+
+function cloneRoutine(routine: Routine): Routine {
+  return {
+    id: routine.id,
+    name: routine.name,
+    tags: [...routine.tags],
+    favorite: routine.favorite,
+    routineDurationMs: routine.routineDurationMs,
+    startDelayMs: routine.startDelayMs,
+    headsUpEnabled: routine.headsUpEnabled,
+    headsUpLeadTimeMs: routine.headsUpLeadTimeMs,
+    hapticsEnabled: routine.hapticsEnabled,
+    duckPlannedFlag: routine.duckPlannedFlag,
+    cues: routine.cues.map((cue) => cloneCue(cue)),
+  };
+}
+
+function assertRoutineContent(routine: Routine): void {
+  if (!hasUniqueCueIds(routine)) {
+    throw new RoutineTransferError(
+      'INVALID_ROUTINE_CONTENT',
+      'Import file routine payload contains duplicate cue ids.'
+    );
+  }
+}
+
 export function createRoutineExportWrapper(routine: Routine): RoutineExportWrapper {
+  if (!isRoutine(routine)) {
+    throw new RoutineTransferError(
+      'INVALID_EXPORT_STRUCTURE',
+      'Cannot export routine: routine payload has an invalid structure.'
+    );
+  }
+
+  assertRoutineContent(routine);
+
   return {
     version: ROUTINE_EXPORT_VERSION,
     routine: cloneRoutine(routine),
@@ -106,26 +215,19 @@ export function createRoutineExportWrapper(routine: Routine): RoutineExportWrapp
 }
 
 export function serializeRoutineExportWrapper(wrapper: RoutineExportWrapper): string {
-  if (!isObjectRecord(wrapper)) {
-    throw new RoutineTransferError(
-      'INVALID_EXPORT_STRUCTURE',
-      'Cannot export routine: wrapper must be an object.'
-    );
-  }
-
-  if (wrapper.version !== ROUTINE_EXPORT_VERSION) {
-    throw new RoutineTransferError(
-      'INVALID_EXPORT_STRUCTURE',
-      `Cannot export routine: version must be ${ROUTINE_EXPORT_VERSION}.`
-    );
-  }
-
-  if (!isRoutine(wrapper.routine)) {
+  if (
+    !isObjectRecord(wrapper) ||
+    !hasOnlyAllowedKeys(wrapper, WRAPPER_KEYS) ||
+    wrapper.version !== ROUTINE_EXPORT_VERSION ||
+    !isRoutine(wrapper.routine)
+  ) {
     throw new RoutineTransferError(
       'INVALID_EXPORT_STRUCTURE',
       'Cannot export routine: routine payload has an invalid structure.'
     );
   }
+
+  assertRoutineContent(wrapper.routine);
 
   return JSON.stringify({
     version: ROUTINE_EXPORT_VERSION,
@@ -155,10 +257,13 @@ export function deserializeRoutineExportWrapper(rawJson: string): RoutineExportW
     );
   }
 
-  if (!Object.prototype.hasOwnProperty.call(parsed, 'routine')) {
+  if (
+    !hasOnlyAllowedKeys(parsed, WRAPPER_KEYS) ||
+    !Object.prototype.hasOwnProperty.call(parsed, 'routine')
+  ) {
     throw new RoutineTransferError(
       'INVALID_EXPORT_STRUCTURE',
-      'Import file is missing the required routine field.'
+      'Import file must contain only version and routine fields.'
     );
   }
 
@@ -169,12 +274,7 @@ export function deserializeRoutineExportWrapper(rawJson: string): RoutineExportW
     );
   }
 
-  if (!hasUniqueCueIds(parsed.routine)) {
-    throw new RoutineTransferError(
-      'INVALID_ROUTINE_CONTENT',
-      'Import file routine payload contains duplicate cue ids.'
-    );
-  }
+  assertRoutineContent(parsed.routine);
 
   return {
     version: ROUTINE_EXPORT_VERSION,

@@ -93,7 +93,7 @@ describe('formatCueTimeFromMs', () => {
 
 describe('normalizeCueOffsetMs', () => {
   it('returns elapsed input unchanged when duration is not provided', () => {
-    expect(normalizeCueOffsetMs({ inputMs: 45_000, inputMode: 'elapsed' })).toEqual({
+    expect(normalizeCueOffsetMs({ inputMs: 45_000 })).toEqual({
       ok: true,
       value: 45_000,
     });
@@ -103,7 +103,6 @@ describe('normalizeCueOffsetMs', () => {
     expect(
       normalizeCueOffsetMs({
         inputMs: 60_000,
-        inputMode: 'elapsed',
         routineDurationMs: 120_000,
       })
     ).toEqual({ ok: true, value: 60_000 });
@@ -112,7 +111,6 @@ describe('normalizeCueOffsetMs', () => {
   it('returns OUT_OF_RANGE when elapsed input exceeds duration', () => {
     const result = normalizeCueOffsetMs({
       inputMs: 200_000,
-      inputMode: 'elapsed',
       routineDurationMs: 120_000,
     });
     expect(result.ok).toBe(false);
@@ -120,67 +118,15 @@ describe('normalizeCueOffsetMs', () => {
       expect(result.error.code).toBe('OUT_OF_RANGE');
     }
   });
-
-  it('converts countdown input to elapsed offset', () => {
-    expect(
-      normalizeCueOffsetMs({
-        inputMs: 30_000,
-        inputMode: 'countdown',
-        routineDurationMs: 120_000,
-      })
-    ).toEqual({ ok: true, value: 90_000 });
-  });
-
-  it('requires routine duration for countdown mode', () => {
-    const result = normalizeCueOffsetMs({
-      inputMs: 30_000,
-      inputMode: 'countdown',
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.code).toBe('MISSING_ROUTINE_DURATION');
-    }
-  });
-
-  it('returns OUT_OF_RANGE when countdown remaining exceeds duration', () => {
-    const result = normalizeCueOffsetMs({
-      inputMs: 90_000,
-      inputMode: 'countdown',
-      routineDurationMs: 60_000,
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.code).toBe('OUT_OF_RANGE');
-    }
-  });
-
-  it('accepts countdown boundaries at 0 and routineDurationMs', () => {
-    expect(
-      normalizeCueOffsetMs({
-        inputMs: 0,
-        inputMode: 'countdown',
-        routineDurationMs: 60_000,
-      })
-    ).toEqual({ ok: true, value: 60_000 });
-
-    expect(
-      normalizeCueOffsetMs({
-        inputMs: 60_000,
-        inputMode: 'countdown',
-        routineDurationMs: 60_000,
-      })
-    ).toEqual({ ok: true, value: 0 });
-  });
 });
 
 describe('parseAndNormalizeCueOffsetMs', () => {
-  it('parses and normalizes countdown input in one pass', () => {
+  it('parses and normalizes elapsed input in one pass', () => {
     expect(
       parseAndNormalizeCueOffsetMs({
         input: '00:30',
-        inputMode: 'countdown',
         routineDurationMs: 120_000,
       })
-    ).toEqual({ ok: true, value: 90_000 });
+    ).toEqual({ ok: true, value: 30_000 });
   });
 });

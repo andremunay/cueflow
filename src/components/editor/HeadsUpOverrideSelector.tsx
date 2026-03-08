@@ -2,7 +2,7 @@ import type { HeadsUpOverride } from '../../types';
 import SegmentedOptionSelector, { type SegmentedOption } from './SegmentedOptionSelector';
 
 const HEADS_UP_OVERRIDE_OPTIONS: readonly SegmentedOption<HeadsUpOverride>[] = [
-  { label: 'Inherit', value: 'inherit' },
+  { label: 'Default', value: 'inherit' },
   { label: 'Off', value: 'off' },
   { label: 'On', value: 'on' },
 ];
@@ -17,7 +17,7 @@ export interface HeadsUpOverrideSelectorProps {
 export default function HeadsUpOverrideSelector({
   value,
   onChange,
-  label = 'Heads-up override',
+  label = 'Heads-up',
   disabled = false,
 }: HeadsUpOverrideSelectorProps) {
   return (

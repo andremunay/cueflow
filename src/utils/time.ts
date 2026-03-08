@@ -1,9 +1,6 @@
-import type { CueInputMode } from '../types';
-
 export type TimeInputErrorCode =
   | 'INVALID_FORMAT'
   | 'INVALID_SEGMENT_RANGE'
-  | 'MISSING_ROUTINE_DURATION'
   | 'OUT_OF_RANGE'
   | 'INVALID_MS';
 
@@ -20,13 +17,11 @@ export type TimeResult<T> = { ok: true; value: T } | { ok: false; error: TimeInp
 
 export interface NormalizeCueOffsetParams {
   inputMs: number;
-  inputMode: CueInputMode;
   routineDurationMs?: number;
 }
 
 export interface ParseAndNormalizeCueOffsetParams {
   input: string;
-  inputMode: CueInputMode;
   routineDurationMs?: number;
 }
 
@@ -195,28 +190,11 @@ export function formatCueTimeFromMs(ms: number): TimeResult<string> {
 }
 
 export function normalizeCueOffsetMs(params: NormalizeCueOffsetParams): TimeResult<number> {
-  const { inputMs, inputMode, routineDurationMs } = params;
+  const { inputMs, routineDurationMs } = params;
 
   const validatedInput = validateMilliseconds(inputMs, 'inputMs');
   if (!validatedInput.ok) {
     return validatedInput;
-  }
-
-  if (inputMode === 'countdown') {
-    if (routineDurationMs === undefined) {
-      return createError({
-        code: 'MISSING_ROUTINE_DURATION',
-        message: 'routineDurationMs is required for countdown input mode.',
-      });
-    }
-
-    const validatedDuration = validateMilliseconds(routineDurationMs, 'routineDurationMs');
-    if (!validatedDuration.ok) {
-      return validatedDuration;
-    }
-
-    const elapsedOffsetMs = routineDurationMs - inputMs;
-    return ensureWithinDuration(elapsedOffsetMs, routineDurationMs);
   }
 
   if (routineDurationMs === undefined) {
@@ -241,7 +219,6 @@ export function parseAndNormalizeCueOffsetMs(
 
   return normalizeCueOffsetMs({
     inputMs: parsedTime.value,
-    inputMode: params.inputMode,
     routineDurationMs: params.routineDurationMs,
   });
 }

@@ -42,14 +42,15 @@ function createRoutineFixture(id: string, overrides: Partial<Routine> = {}): Rou
     tags: ['tag'],
     favorite: false,
     routineDurationMs: 60_000,
-    defaultHeadsUpEnabled: true,
+    startDelayMs: 3_000,
+    headsUpEnabled: true,
+    headsUpLeadTimeMs: 1_000,
     hapticsEnabled: false,
     duckPlannedFlag: false,
     cues: [
       {
         id: `${id}-cue-1`,
         offsetMs: 5_000,
-        inputMode: 'elapsed',
         actionType: 'tts',
         ttsText: 'start',
         headsUpOverride: 'inherit',

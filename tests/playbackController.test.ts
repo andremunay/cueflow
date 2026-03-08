@@ -17,7 +17,6 @@ function createCue(overrides: Partial<Cue> & Pick<Cue, 'id' | 'offsetMs' | 'acti
   const base: Cue = {
     id: overrides.id,
     offsetMs: overrides.offsetMs,
-    inputMode: 'elapsed',
     actionType: overrides.actionType,
     headsUpOverride: 'inherit',
   };
@@ -44,7 +43,9 @@ function createRoutine(params: {
   cues: Cue[];
   routineDurationMs: number;
   hapticsEnabled?: boolean;
-  defaultHeadsUpEnabled?: boolean;
+  headsUpEnabled?: boolean;
+  headsUpLeadTimeMs?: number;
+  startDelayMs?: number;
 }): Routine {
   return {
     id: 'routine-1',
@@ -52,7 +53,9 @@ function createRoutine(params: {
     tags: [],
     favorite: false,
     routineDurationMs: params.routineDurationMs,
-    defaultHeadsUpEnabled: params.defaultHeadsUpEnabled ?? true,
+    startDelayMs: params.startDelayMs ?? 0,
+    headsUpEnabled: params.headsUpEnabled ?? false,
+    headsUpLeadTimeMs: params.headsUpLeadTimeMs ?? 1_000,
     hapticsEnabled: params.hapticsEnabled ?? false,
     duckPlannedFlag: false,
     cues: params.cues,
@@ -96,6 +99,7 @@ describe('createPlaybackController', () => {
     const clock: TestClock = { value: 0 };
     const routine = createRoutine({
       routineDurationMs: 8_000,
+      headsUpEnabled: true,
       cues: [createCue({ id: 'cue-1', offsetMs: 5_000, actionType: 'tts', ttsText: 'Move' })],
     });
 
@@ -110,16 +114,59 @@ describe('createPlaybackController', () => {
     await flushMicrotasks();
 
     await advanceTime(clock, 2_000);
-    expect(media.playSound).toHaveBeenCalledTimes(1);
-    expect(media.playSound).toHaveBeenNthCalledWith(1, 'beep');
+    expect(media.playSound).toHaveBeenCalledTimes(0);
 
     await advanceTime(clock, 3_000);
+    expect(media.playSound).toHaveBeenCalledTimes(1);
+    expect(media.playSound).toHaveBeenNthCalledWith(1, 'beep');
     expect(media.speakText).toHaveBeenCalledTimes(1);
     expect(media.speakText).toHaveBeenNthCalledWith(1, 'Move');
 
     await advanceTime(clock, 2_000);
     expect(media.playSound).toHaveBeenCalledTimes(1);
     expect(media.speakText).toHaveBeenCalledTimes(1);
+  });
+
+  it('delays playback start, then fires 00:00 cue at routine start and advances next cue', async () => {
+    const media = createMockMedia();
+    const clock: TestClock = { value: 0 };
+    const routine = createRoutine({
+      routineDurationMs: 7_000,
+      startDelayMs: 3_000,
+      cues: [
+        createCue({ id: 'cue-0', offsetMs: 0, actionType: 'tts', ttsText: 'Start now' }),
+        createCue({ id: 'cue-1', offsetMs: 2_000, actionType: 'tts', ttsText: 'Next up' }),
+      ],
+    });
+
+    const controller = createPlaybackController({
+      routine,
+      tickIntervalMs: 100,
+      now: () => clock.value,
+      media,
+    });
+
+    controller.start();
+    await flushMicrotasks();
+
+    expect(controller.getState().elapsedMs).toBe(0);
+    expect(controller.getState().nextCueIndex).toBe(0);
+
+    await advanceTime(clock, 2_900);
+    expect(media.speakText).toHaveBeenCalledTimes(0);
+    expect(controller.getState().elapsedMs).toBe(0);
+    expect(controller.getState().nextCueIndex).toBe(0);
+
+    await advanceTime(clock, 100);
+    expect(media.speakText).toHaveBeenCalledTimes(1);
+    expect(media.speakText).toHaveBeenNthCalledWith(1, 'Start now');
+    expect(controller.getState().firedCueIds).toEqual(['cue-0']);
+    expect(controller.getState().nextCueIndex).toBe(1);
+
+    await advanceTime(clock, 2_000);
+    expect(media.speakText).toHaveBeenCalledTimes(2);
+    expect(media.speakText).toHaveBeenNthCalledWith(2, 'Next up');
+    expect(controller.getState().nextCueIndex).toBe(-1);
   });
 
   it('pauses progression and resumes with paused-duration shifting', async () => {
@@ -167,6 +214,7 @@ describe('createPlaybackController', () => {
     const clock: TestClock = { value: 0 };
     const routine = createRoutine({
       routineDurationMs: 15_000,
+      headsUpEnabled: true,
       cues: [
         createCue({ id: 'cue-1', offsetMs: 8_000, actionType: 'tts', ttsText: 'First' }),
         createCue({ id: 'cue-2', offsetMs: 12_000, actionType: 'tts', ttsText: 'Second' }),
@@ -197,12 +245,12 @@ describe('createPlaybackController', () => {
     expect(media.speakText).toHaveBeenNthCalledWith(1, 'First');
     expect(media.playSound).toHaveBeenCalledTimes(0);
 
-    await advanceTime(clock, 1_500);
+    await advanceTime(clock, 3_000);
     expect(media.playSound).toHaveBeenCalledTimes(1);
     expect(media.playSound).toHaveBeenNthCalledWith(1, 'beep');
     expect(media.speakText).toHaveBeenCalledTimes(1);
 
-    await advanceTime(clock, 2_500);
+    await advanceTime(clock, 1_000);
     expect(media.speakText).toHaveBeenCalledTimes(2);
     expect(media.speakText).toHaveBeenNthCalledWith(2, 'Second');
 
@@ -216,6 +264,7 @@ describe('createPlaybackController', () => {
     const routine = createRoutine({
       routineDurationMs: 8_000,
       hapticsEnabled: true,
+      headsUpEnabled: true,
       cues: [createCue({ id: 'cue-1', offsetMs: 6_000, actionType: 'tts', ttsText: 'Cue now' })],
     });
 
@@ -229,15 +278,42 @@ describe('createPlaybackController', () => {
     controller.start();
     await flushMicrotasks();
 
-    await advanceTime(clock, 3_000);
+    await advanceTime(clock, 5_000);
     expect(media.playSound).toHaveBeenCalledTimes(1);
     expect(media.playSound).toHaveBeenNthCalledWith(1, 'beep');
     expect(media.speakText).toHaveBeenCalledTimes(0);
     expect(media.triggerHaptic).toHaveBeenCalledTimes(0);
 
-    await advanceTime(clock, 3_000);
+    await advanceTime(clock, 1_000);
     expect(media.speakText).toHaveBeenCalledTimes(1);
     expect(media.triggerHaptic).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports configurable heads-up lead time per routine', async () => {
+    const media = createMockMedia();
+    const clock: TestClock = { value: 0 };
+    const routine = createRoutine({
+      routineDurationMs: 8_000,
+      headsUpEnabled: true,
+      headsUpLeadTimeMs: 2_000,
+      cues: [createCue({ id: 'cue-1', offsetMs: 6_000, actionType: 'tts', ttsText: 'Cue now' })],
+    });
+
+    const controller = createPlaybackController({
+      routine,
+      tickIntervalMs: 100,
+      now: () => clock.value,
+      media,
+    });
+
+    controller.start();
+    await flushMicrotasks();
+
+    await advanceTime(clock, 3_999);
+    expect(media.playSound).toHaveBeenCalledTimes(0);
+    await advanceTime(clock, 1);
+    expect(media.playSound).toHaveBeenCalledTimes(1);
+    expect(media.playSound).toHaveBeenNthCalledWith(1, 'beep');
   });
 
   it('fires heads-up when default is enabled and cue override inherits', async () => {
@@ -245,7 +321,7 @@ describe('createPlaybackController', () => {
     const clock: TestClock = { value: 0 };
     const routine = createRoutine({
       routineDurationMs: 8_000,
-      defaultHeadsUpEnabled: true,
+      headsUpEnabled: true,
       cues: [
         createCue({
           id: 'cue-1',
@@ -267,11 +343,11 @@ describe('createPlaybackController', () => {
     controller.start();
     await flushMicrotasks();
 
-    await advanceTime(clock, 3_000);
+    await advanceTime(clock, 5_000);
     expect(media.playSound).toHaveBeenCalledTimes(1);
     expect(media.playSound).toHaveBeenNthCalledWith(1, 'beep');
 
-    await advanceTime(clock, 3_000);
+    await advanceTime(clock, 1_000);
     expect(media.speakText).toHaveBeenCalledTimes(1);
   });
 
@@ -280,7 +356,7 @@ describe('createPlaybackController', () => {
     const clock: TestClock = { value: 0 };
     const routine = createRoutine({
       routineDurationMs: 8_000,
-      defaultHeadsUpEnabled: false,
+      headsUpEnabled: false,
       cues: [
         createCue({
           id: 'cue-1',
@@ -302,21 +378,21 @@ describe('createPlaybackController', () => {
     controller.start();
     await flushMicrotasks();
 
-    await advanceTime(clock, 3_000);
+    await advanceTime(clock, 5_000);
     expect(media.playSound).toHaveBeenCalledTimes(0);
     expect(media.speakText).toHaveBeenCalledTimes(0);
 
-    await advanceTime(clock, 3_000);
+    await advanceTime(clock, 1_000);
     expect(media.playSound).toHaveBeenCalledTimes(0);
     expect(media.speakText).toHaveBeenCalledTimes(1);
   });
 
-  it('forces heads-up when cue override is on and default is disabled', async () => {
+  it('fires heads-up when cue override is on even if routine heads-up is disabled', async () => {
     const media = createMockMedia();
     const clock: TestClock = { value: 0 };
     const routine = createRoutine({
       routineDurationMs: 8_000,
-      defaultHeadsUpEnabled: false,
+      headsUpEnabled: false,
       cues: [
         createCue({
           id: 'cue-1',
@@ -338,12 +414,49 @@ describe('createPlaybackController', () => {
     controller.start();
     await flushMicrotasks();
 
-    await advanceTime(clock, 3_000);
+    await advanceTime(clock, 5_000);
     expect(media.playSound).toHaveBeenCalledTimes(1);
     expect(media.playSound).toHaveBeenNthCalledWith(1, 'beep');
 
-    await advanceTime(clock, 3_000);
+    await advanceTime(clock, 1_000);
     expect(media.speakText).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses cue-specific lead time when cue override is on', async () => {
+    const media = createMockMedia();
+    const clock: TestClock = { value: 0 };
+    const routine = createRoutine({
+      routineDurationMs: 8_000,
+      headsUpEnabled: true,
+      headsUpLeadTimeMs: 1_000,
+      cues: [
+        createCue({
+          id: 'cue-1',
+          offsetMs: 6_000,
+          actionType: 'tts',
+          ttsText: 'Cue now',
+          headsUpOverride: 'on',
+          headsUpLeadTimeMs: 2_000,
+        }),
+      ],
+    });
+
+    const controller = createPlaybackController({
+      routine,
+      tickIntervalMs: 100,
+      now: () => clock.value,
+      media,
+    });
+
+    controller.start();
+    await flushMicrotasks();
+
+    await advanceTime(clock, 3_999);
+    expect(media.playSound).toHaveBeenCalledTimes(0);
+
+    await advanceTime(clock, 1);
+    expect(media.playSound).toHaveBeenCalledTimes(1);
+    expect(media.playSound).toHaveBeenNthCalledWith(1, 'beep');
   });
 
   it('suppresses heads-up when cue override is off and default is enabled', async () => {
@@ -351,7 +464,7 @@ describe('createPlaybackController', () => {
     const clock: TestClock = { value: 0 };
     const routine = createRoutine({
       routineDurationMs: 8_000,
-      defaultHeadsUpEnabled: true,
+      headsUpEnabled: true,
       cues: [
         createCue({
           id: 'cue-1',
@@ -373,11 +486,11 @@ describe('createPlaybackController', () => {
     controller.start();
     await flushMicrotasks();
 
-    await advanceTime(clock, 3_000);
+    await advanceTime(clock, 5_000);
     expect(media.playSound).toHaveBeenCalledTimes(0);
     expect(media.speakText).toHaveBeenCalledTimes(0);
 
-    await advanceTime(clock, 3_000);
+    await advanceTime(clock, 1_000);
     expect(media.playSound).toHaveBeenCalledTimes(0);
     expect(media.speakText).toHaveBeenCalledTimes(1);
   });
@@ -409,23 +522,33 @@ describe('createPlaybackController', () => {
 
     controller.start();
     await flushMicrotasks();
-    await advanceTime(clock, 3_000);
-
-    expect(media.speakText).toHaveBeenCalledTimes(2);
+    await advanceTime(clock, 1_000);
+    expect(media.speakText).toHaveBeenCalledTimes(1);
     expect(media.speakText).toHaveBeenNthCalledWith(1, 'One');
+    expect(media.playSound).toHaveBeenCalledTimes(0);
+
+    await advanceTime(clock, 500);
+    expect(media.playSound).toHaveBeenCalledTimes(1);
+    expect(media.playSound).toHaveBeenNthCalledWith(1, 'chime');
+
+    await advanceTime(clock, 1_000);
+    expect(media.speakText).toHaveBeenCalledTimes(2);
     expect(media.speakText).toHaveBeenNthCalledWith(2, 'Three');
     expect(media.playSound).toHaveBeenCalledTimes(2);
-    expect(media.playSound).toHaveBeenNthCalledWith(1, 'chime');
     expect(media.playSound).toHaveBeenNthCalledWith(2, 'whistle');
     expect(media.triggerHaptic).toHaveBeenCalledTimes(0);
   });
 
-  it('replays the last executed cue without replaying heads-up or shifting playback state', async () => {
+  it('replays last cue and rewinds playback timeline so future cues shift later', async () => {
     const media = createMockMedia();
     const clock: TestClock = { value: 0 };
     const routine = createRoutine({
-      routineDurationMs: 9_000,
-      cues: [createCue({ id: 'cue-1', offsetMs: 4_000, actionType: 'tts', ttsText: 'Repeat me' })],
+      routineDurationMs: 12_000,
+      headsUpEnabled: false,
+      cues: [
+        createCue({ id: 'cue-1', offsetMs: 4_000, actionType: 'tts', ttsText: 'Repeat me' }),
+        createCue({ id: 'cue-2', offsetMs: 8_000, actionType: 'tts', ttsText: 'Later cue' }),
+      ],
     });
 
     const controller = createPlaybackController({
@@ -437,24 +560,30 @@ describe('createPlaybackController', () => {
 
     controller.start();
     await flushMicrotasks();
-    await advanceTime(clock, 4_000);
+    await advanceTime(clock, 6_000);
 
     const stateBeforeReplay = controller.getState();
     expect(stateBeforeReplay.lastExecutedCueId).toBe('cue-1');
-    expect(media.playSound).toHaveBeenCalledTimes(1);
+    expect(stateBeforeReplay.elapsedMs).toBe(6_000);
     expect(media.speakText).toHaveBeenCalledTimes(1);
 
     controller.replayLastCue();
     await flushMicrotasks();
 
     const stateAfterReplay = controller.getState();
-    expect(stateAfterReplay.elapsedMs).toBe(stateBeforeReplay.elapsedMs);
-    expect(stateAfterReplay.firedCueIds).toEqual(stateBeforeReplay.firedCueIds);
-    expect(stateAfterReplay.firedHeadsUpCueIds).toEqual(stateBeforeReplay.firedHeadsUpCueIds);
-    expect(stateAfterReplay.nextCueIndex).toBe(stateBeforeReplay.nextCueIndex);
+    expect(stateAfterReplay.elapsedMs).toBe(4_000);
+    expect(stateAfterReplay.firedCueIds).toEqual(['cue-1']);
+    expect(stateAfterReplay.firedHeadsUpCueIds).toContain('cue-1');
+    expect(stateAfterReplay.nextCueIndex).toBe(1);
     expect(media.speakText).toHaveBeenCalledTimes(2);
     expect(media.speakText).toHaveBeenNthCalledWith(2, 'Repeat me');
-    expect(media.playSound).toHaveBeenCalledTimes(1);
+
+    await advanceTime(clock, 2_000);
+    expect(media.speakText).toHaveBeenCalledTimes(2);
+
+    await advanceTime(clock, 2_000);
+    expect(media.speakText).toHaveBeenCalledTimes(3);
+    expect(media.speakText).toHaveBeenNthCalledWith(3, 'Later cue');
   });
 
   it('treats skip and replay as no-ops when not running', async () => {
@@ -576,3 +705,4 @@ describe('createPlaybackController', () => {
     expect(media.speakText).toHaveBeenCalledTimes(0);
   });
 });
+
