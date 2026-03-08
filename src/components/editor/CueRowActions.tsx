@@ -32,32 +32,22 @@ function ActionButton({ label, onPress, disabled, destructive = false }: ActionB
 }
 
 export interface CueRowActionsProps {
-  onMoveUp: () => void;
-  onMoveDown: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
-  disableMoveUp?: boolean;
-  disableMoveDown?: boolean;
   disableDuplicate?: boolean;
   disableDelete?: boolean;
   disabled?: boolean;
 }
 
 export default function CueRowActions({
-  onMoveUp,
-  onMoveDown,
   onDuplicate,
   onDelete,
-  disableMoveUp = false,
-  disableMoveDown = false,
   disableDuplicate = false,
   disableDelete = false,
   disabled = false,
 }: CueRowActionsProps) {
   return (
     <View style={styles.container}>
-      <ActionButton label="Move Up" onPress={onMoveUp} disabled={disabled || disableMoveUp} />
-      <ActionButton label="Move Down" onPress={onMoveDown} disabled={disabled || disableMoveDown} />
       <ActionButton
         label="Duplicate"
         onPress={onDuplicate}

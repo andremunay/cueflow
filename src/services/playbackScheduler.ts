@@ -1,6 +1,7 @@
 import type { Cue } from '../types';
+import { DEFAULT_HEADS_UP_LEAD_TIME_MS } from '../constants';
 
-export const HEADS_UP_LEAD_TIME_MS = 3_000;
+export const HEADS_UP_LEAD_TIME_MS = DEFAULT_HEADS_UP_LEAD_TIME_MS;
 
 export type PlaybackDueEventType = 'headsUp' | 'cue';
 
@@ -33,6 +34,8 @@ export interface CollectDuePlaybackEventsParams {
   orderedCues: OrderedPlaybackCue[];
   previousElapsedMs: number;
   currentElapsedMs: number;
+  headsUpEnabled?: boolean;
+  headsUpLeadTimeMs?: number;
   fired: PlaybackFiredStateSnapshot;
 }
 
@@ -40,12 +43,67 @@ export interface CollectDuePlaybackEventsResult extends PlaybackFiredStateSnapsh
   events: PlaybackDueEvent[];
 }
 
-function sanitizeElapsedMs(value: number): number {
+function sanitizeCurrentElapsedMs(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
 
   return value < 0 ? 0 : value;
+}
+
+function sanitizePreviousElapsedMs(value: number): number {
+  if (!Number.isFinite(value)) {
+    return -1;
+  }
+
+  if (value < -1) {
+    return -1;
+  }
+
+  return value;
+}
+
+function sanitizeHeadsUpLeadTimeMs(value: number | undefined): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    return HEADS_UP_LEAD_TIME_MS;
+  }
+
+  return value;
+}
+
+function isHeadsUpEnabledForCue(cue: Cue, routineHeadsUpEnabled: boolean): boolean {
+  if (cue.headsUpOverride === 'on') {
+    return true;
+  }
+
+  if (cue.headsUpOverride === 'off') {
+    return false;
+  }
+
+  return routineHeadsUpEnabled;
+}
+
+function resolveCueHeadsUpLeadTimeMs(cue: Cue, routineHeadsUpLeadTimeMs: number): number {
+  if (cue.headsUpOverride !== 'on') {
+    return routineHeadsUpLeadTimeMs;
+  }
+
+  const cueLeadTimeMs = cue.headsUpLeadTimeMs;
+  if (
+    typeof cueLeadTimeMs !== 'number' ||
+    !Number.isFinite(cueLeadTimeMs) ||
+    !Number.isInteger(cueLeadTimeMs) ||
+    cueLeadTimeMs < 0
+  ) {
+    return routineHeadsUpLeadTimeMs;
+  }
+
+  return cueLeadTimeMs;
 }
 
 function isDueWithinRange(triggerMs: number, previousElapsedMs: number, currentElapsedMs: number): boolean {
@@ -76,7 +134,7 @@ export function buildOrderedPlaybackCues(cues: Cue[]): OrderedPlaybackCue[] {
 
 export function computePlaybackElapsedMs(params: ComputePlaybackElapsedMsParams): number {
   const elapsedMs = params.nowMs - params.routineStartTimeMs - params.totalPausedMs;
-  return sanitizeElapsedMs(elapsedMs);
+  return sanitizeCurrentElapsedMs(elapsedMs);
 }
 
 export function findNextCueSortedIndex(
@@ -91,8 +149,10 @@ export function findNextCueSortedIndex(
 export function collectDuePlaybackEvents(
   params: CollectDuePlaybackEventsParams
 ): CollectDuePlaybackEventsResult {
-  const previousElapsedMs = sanitizeElapsedMs(params.previousElapsedMs);
-  const currentElapsedMs = sanitizeElapsedMs(params.currentElapsedMs);
+  const previousElapsedMs = sanitizePreviousElapsedMs(params.previousElapsedMs);
+  const currentElapsedMs = sanitizeCurrentElapsedMs(params.currentElapsedMs);
+  const routineHeadsUpEnabled = params.headsUpEnabled ?? true;
+  const routineHeadsUpLeadTimeMs = sanitizeHeadsUpLeadTimeMs(params.headsUpLeadTimeMs);
   const firedCueIdsSet = new Set(params.fired.firedCueIds);
   const firedHeadsUpCueIdsSet = new Set(params.fired.firedHeadsUpCueIds);
   const events: PlaybackDueEvent[] = [];
@@ -101,8 +161,18 @@ export function collectDuePlaybackEvents(
     const cueId = orderedCue.cue.id;
     const cueOffsetMs = orderedCue.cue.offsetMs;
 
-    if (!firedHeadsUpCueIdsSet.has(cueId) && cueOffsetMs >= HEADS_UP_LEAD_TIME_MS) {
-      const headsUpTriggerMs = cueOffsetMs - HEADS_UP_LEAD_TIME_MS;
+    const cueHeadsUpEnabled = isHeadsUpEnabledForCue(orderedCue.cue, routineHeadsUpEnabled);
+    const cueHeadsUpLeadTimeMs = resolveCueHeadsUpLeadTimeMs(
+      orderedCue.cue,
+      routineHeadsUpLeadTimeMs
+    );
+
+    if (
+      cueHeadsUpEnabled &&
+      !firedHeadsUpCueIdsSet.has(cueId) &&
+      cueOffsetMs >= cueHeadsUpLeadTimeMs
+    ) {
+      const headsUpTriggerMs = cueOffsetMs - cueHeadsUpLeadTimeMs;
       if (isDueWithinRange(headsUpTriggerMs, previousElapsedMs, currentElapsedMs)) {
         firedHeadsUpCueIdsSet.add(cueId);
         events.push({

@@ -1,7 +1,5 @@
 export type CueActionType = 'tts' | 'sound' | 'combo';
 
-export type CueInputMode = 'elapsed' | 'countdown';
-
 export type HeadsUpOverride = 'inherit' | 'off' | 'on';
 
 export type SoundId = 'beep' | 'chime' | 'whistle';
@@ -9,11 +7,11 @@ export type SoundId = 'beep' | 'chime' | 'whistle';
 export interface Cue {
   id: string;
   offsetMs: number;
-  inputMode: CueInputMode;
   actionType: CueActionType;
   ttsText?: string;
   soundId?: SoundId;
   headsUpOverride: HeadsUpOverride;
+  headsUpLeadTimeMs?: number;
 }
 
 export interface Routine {
@@ -22,7 +20,9 @@ export interface Routine {
   tags: string[];
   favorite: boolean;
   routineDurationMs: number;
-  defaultHeadsUpEnabled: boolean;
+  startDelayMs: number;
+  headsUpEnabled: boolean;
+  headsUpLeadTimeMs: number;
   hapticsEnabled: boolean;
   duckPlannedFlag: boolean;
   cues: Cue[];
@@ -39,11 +39,11 @@ export type ValidationSeverity = 'error' | 'warning';
 
 export type ValidationCode =
   | 'NEGATIVE_TIME'
+  | 'CUE_OUTSIDE_DURATION'
   | 'DUPLICATE_TIMESTAMP'
   | 'DURATION_EXCEEDS_MAX'
   | 'CUE_COUNT_EXCEEDS_MAX'
   | 'MISSING_ROUTINE_DURATION'
-  | 'INVALID_COUNTDOWN_CONVERSION'
   | 'OVERLAPPING_CUES'
   | 'OUT_OF_ORDER_CUES';
 

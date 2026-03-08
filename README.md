@@ -38,7 +38,7 @@ npx expo run:ios
 npm test -- --runInBand
 ```
 
-Latest local verification in this repository: `10` test suites passed, `87` tests passed.
+Latest local verification in this repository: `10` test suites passed, `96` tests passed.
 
 ## Feature Overview
 
@@ -56,6 +56,7 @@ Latest local verification in this repository: `10` test suites passed, `87` test
 
 - Edits routine metadata: name, tags, favorite.
 - Requires routine duration before reliable countdown entry.
+- Supports configurable routine start delay (default `00:03`).
 - Includes toggles for default heads-up, haptics, and duck flag (`planned/no-op`).
 - Cue rows support:
   - Time entry (`mm:ss` or `hh:mm:ss`)
@@ -77,7 +78,7 @@ Latest local verification in this repository: `10` test suites passed, `87` test
   - tracks total paused duration,
   - uses interval ticks instead of one timer per cue.
 - Heads-up behavior:
-  - ping-only, 3 seconds before cue time,
+  - ping-only, 1 second before cue time,
   - no spoken countdown,
   - deduplicated so heads-up/cue events do not double-fire.
 
@@ -99,12 +100,21 @@ Latest local verification in this repository: `10` test suites passed, `87` test
   tags: string[];
   favorite: boolean;
   routineDurationMs: number;
-  defaultHeadsUpEnabled: boolean;
+  startDelayMs: number;
+  headsUpEnabled: boolean;
+  headsUpLeadTimeMs: number;
   hapticsEnabled: boolean;
   duckPlannedFlag: boolean;
   cues: Cue[];
 }
 ```
+
+### Recover from incompatible local payloads
+
+If you see a storage-format error such as `Stored routines payload has an unsupported structure`, clear the local routines key and recreate/import routines with the current schema.
+
+- Web: open browser storage tools and remove local storage key `@cue-builder/routines`.
+- iOS/Android: clear app data or reinstall the app (direct file-level deletion is platform/runtime dependent and usually unavailable from repo context).
 
 ### Current limits
 
@@ -133,7 +143,7 @@ Latest local verification in this repository: `10` test suites passed, `87` test
 - `src/screens`: Library, Routine Editor, Playback, Presets placeholder.
 - `src/components/editor`: reusable editor controls and cue row UI.
 - `src/services`:
-  - `routineStorage*`: AsyncStorage CRUD + serialization/migration shape handling
+  - `routineStorage*`: AsyncStorage CRUD + strict schema serialization/validation
   - `playbackScheduler` + `playbackController`: deterministic scheduling and control semantics
   - `media`: sound playback, TTS, haptics wrappers
   - `routineTransfer*`: import/export serialization and validation
@@ -187,7 +197,7 @@ Use this checklist on at least one Android device and one iOS device when possib
 - [ ] Combo cue
   - Pass: cue with `combo` plays sound then voice at cue time.
 - [ ] Heads-up behavior with default and override
-  - Pass: eligible cues fire ping-only heads-up at `t-3s`; override `off` suppresses it; override `on` forces it even if default is off.
+  - Pass: eligible cues fire ping-only heads-up at `t-1s`; override `off` suppresses it; override `on` forces it even if default is off.
 - [ ] Pause and resume shifting
   - Pass: pause for about 10 seconds, resume, and remaining cues execute about 10 seconds later than pre-pause schedule.
 - [ ] Skip Next behavior

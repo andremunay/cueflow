@@ -2,23 +2,16 @@
 
 import { MAX_CUE_COUNT, MAX_ROUTINE_DURATION_MS } from '../src/constants';
 import { OVERLAP_WARNING_GAP_MS, validateRoutine } from '../src/utils';
-import type { CueInputMode } from '../src/types';
 
 interface CueInput {
   id: string;
   offsetMs: number;
-  inputMode: CueInputMode;
 }
 
-function createCue(
-  index: number,
-  offsetMs: number,
-  inputMode: CueInputMode = 'elapsed'
-): CueInput {
+function createCue(index: number, offsetMs: number): CueInput {
   return {
     id: `cue-${index}`,
     offsetMs,
-    inputMode,
   };
 }
 
@@ -30,7 +23,7 @@ describe('validateRoutine', () => {
   it('returns no issues for a valid routine', () => {
     const result = validateRoutine({
       routineDurationMs: 60_000,
-      cues: [createCue(0, 5_000), createCue(1, 10_000, 'countdown')],
+      cues: [createCue(0, 5_000), createCue(1, 10_000)],
     });
 
     expect(result).toEqual({
@@ -40,31 +33,19 @@ describe('validateRoutine', () => {
     });
   });
 
-  it.each([
-    undefined,
-    null,
-    Number.NaN,
-    Number.POSITIVE_INFINITY,
-    1_000.5,
-    0,
-    -1,
-  ])(
+  it.each([undefined, null, Number.NaN, Number.POSITIVE_INFINITY, 1_000.5, 0, -1])(
     'returns MISSING_ROUTINE_DURATION for invalid required duration (%p)',
     (routineDurationMs) => {
       const result = validateRoutine({
         routineDurationMs,
-        cues: [createCue(0, 2_000, 'countdown')],
+        cues: [createCue(0, 2_000)],
       });
 
       const missingDurationIssues = result.issues.filter(
         (issue) => issue.code === 'MISSING_ROUTINE_DURATION'
       );
-      const countdownConversionIssues = result.issues.filter(
-        (issue) => issue.code === 'INVALID_COUNTDOWN_CONVERSION'
-      );
 
       expect(missingDurationIssues).toHaveLength(1);
-      expect(countdownConversionIssues).toHaveLength(0);
       expect(result.hasErrors).toBe(true);
     }
   );
@@ -110,6 +91,20 @@ describe('validateRoutine', () => {
     expect(result.hasErrors).toBe(true);
   });
 
+  it('returns CUE_OUTSIDE_DURATION for cues later than routine duration', () => {
+    const result = validateRoutine({
+      routineDurationMs: 60_000,
+      cues: [createCue(0, 61_000), createCue(1, 80_000)],
+    });
+
+    const outOfRangeIssues = result.issues.filter((issue) => issue.code === 'CUE_OUTSIDE_DURATION');
+
+    expect(outOfRangeIssues).toHaveLength(2);
+    expect(outOfRangeIssues[0].path).toBe('cues[0].offsetMs');
+    expect(outOfRangeIssues[1].path).toBe('cues[1].offsetMs');
+    expect(result.hasErrors).toBe(true);
+  });
+
   it('returns DUPLICATE_TIMESTAMP for each duplicate occurrence after the first', () => {
     const result = validateRoutine({
       routineDurationMs: 60_000,
@@ -126,31 +121,13 @@ describe('validateRoutine', () => {
     expect(result.hasErrors).toBe(true);
   });
 
-  it('returns INVALID_COUNTDOWN_CONVERSION for countdown cue offsets outside duration bounds', () => {
-    const result = validateRoutine({
-      routineDurationMs: 60_000,
-      cues: [createCue(0, 61_000, 'countdown'), createCue(1, 80_000, 'countdown')],
-    });
-
-    const countdownIssues = result.issues.filter(
-      (issue) => issue.code === 'INVALID_COUNTDOWN_CONVERSION'
-    );
-
-    expect(countdownIssues).toHaveLength(2);
-    expect(countdownIssues[0].path).toBe('cues[0].offsetMs');
-    expect(countdownIssues[1].path).toBe('cues[1].offsetMs');
-    expect(result.hasErrors).toBe(true);
-  });
-
   it('returns OUT_OF_ORDER_CUES warnings for list-order regressions', () => {
     const result = validateRoutine({
       routineDurationMs: 60_000,
       cues: [createCue(0, 1_000), createCue(1, 4_000), createCue(2, 3_000)],
     });
 
-    const outOfOrderIssues = result.issues.filter(
-      (issue) => issue.code === 'OUT_OF_ORDER_CUES'
-    );
+    const outOfOrderIssues = result.issues.filter((issue) => issue.code === 'OUT_OF_ORDER_CUES');
 
     expect(outOfOrderIssues).toHaveLength(1);
     expect(outOfOrderIssues[0].severity).toBe('warning');
@@ -200,9 +177,6 @@ describe('validateRoutine', () => {
     expect(result.hasErrors).toBe(false);
     expect(result.hasWarnings).toBe(true);
     expect(result.issues.every((issue) => issue.severity === 'warning')).toBe(true);
-    expect(result.issues.map((issue) => issue.code)).toEqual([
-      'OUT_OF_ORDER_CUES',
-      'OUT_OF_ORDER_CUES',
-    ]);
+    expect(result.issues.map((issue) => issue.code)).toEqual(['OUT_OF_ORDER_CUES', 'OUT_OF_ORDER_CUES']);
   });
 });

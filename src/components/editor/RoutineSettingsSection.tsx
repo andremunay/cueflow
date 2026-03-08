@@ -25,14 +25,22 @@ function ToggleRow({ label, value, onValueChange, disabled = false, description 
 export interface RoutineSettingsSectionProps {
   durationText: string;
   onDurationTextChange: (value: string) => void;
-  defaultHeadsUpEnabled: boolean;
-  onDefaultHeadsUpEnabledChange: (value: boolean) => void;
+  startDelayText: string;
+  onStartDelayTextChange: (value: string) => void;
+  headsUpEnabled: boolean;
+  onHeadsUpEnabledChange: (value: boolean) => void;
+  headsUpLeadTimeText: string;
+  onHeadsUpLeadTimeTextChange: (value: string) => void;
   hapticsEnabled: boolean;
   onHapticsEnabledChange: (value: boolean) => void;
   duckPlannedFlag: boolean;
   onDuckPlannedFlagChange: (value: boolean) => void;
   durationErrorText?: string;
   durationHelperText?: string;
+  startDelayErrorText?: string;
+  startDelayHelperText?: string;
+  headsUpLeadTimeErrorText?: string;
+  headsUpLeadTimeHelperText?: string;
   disabled?: boolean;
   title?: string;
 }
@@ -40,14 +48,22 @@ export interface RoutineSettingsSectionProps {
 export default function RoutineSettingsSection({
   durationText,
   onDurationTextChange,
-  defaultHeadsUpEnabled,
-  onDefaultHeadsUpEnabledChange,
+  startDelayText,
+  onStartDelayTextChange,
+  headsUpEnabled,
+  onHeadsUpEnabledChange,
+  headsUpLeadTimeText,
+  onHeadsUpLeadTimeTextChange,
   hapticsEnabled,
   onHapticsEnabledChange,
   duckPlannedFlag,
   onDuckPlannedFlagChange,
   durationErrorText,
   durationHelperText,
+  startDelayErrorText,
+  startDelayHelperText,
+  headsUpLeadTimeErrorText,
+  headsUpLeadTimeHelperText,
   disabled = false,
   title = 'Routine Settings',
 }: RoutineSettingsSectionProps) {
@@ -66,13 +82,39 @@ export default function RoutineSettingsSection({
         helperText={durationHelperText}
         editable={!disabled}
       />
-      <View style={styles.toggleGroup}>
-        <ToggleRow
-          label="Default heads-up"
-          value={defaultHeadsUpEnabled}
-          onValueChange={onDefaultHeadsUpEnabledChange}
-          disabled={disabled}
+      <LabeledTextField
+        label="Start delay"
+        value={startDelayText}
+        onChangeText={onStartDelayTextChange}
+        placeholder="mm:ss or hh:mm:ss"
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="numbers-and-punctuation"
+        errorText={startDelayErrorText}
+        helperText={startDelayHelperText}
+        editable={!disabled}
+      />
+      <ToggleRow
+        label="Heads-up"
+        value={headsUpEnabled}
+        onValueChange={onHeadsUpEnabledChange}
+        disabled={disabled}
+      />
+      {headsUpEnabled ? (
+        <LabeledTextField
+          label="Heads-up lead time"
+          value={headsUpLeadTimeText}
+          onChangeText={onHeadsUpLeadTimeTextChange}
+          placeholder="mm:ss or hh:mm:ss"
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="numbers-and-punctuation"
+          errorText={headsUpLeadTimeErrorText}
+          helperText={headsUpLeadTimeHelperText}
+          editable={!disabled}
         />
+      ) : null}
+      <View style={styles.toggleGroup}>
         <ToggleRow
           label="Haptics at cue time"
           value={hapticsEnabled}

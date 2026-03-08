@@ -1,4 +1,8 @@
-import { PLAYBACK_TICK_INTERVAL_TARGET_MS } from '../constants';
+import {
+  DEFAULT_HEADS_UP_LEAD_TIME_MS,
+  DEFAULT_ROUTINE_START_DELAY_MS,
+  PLAYBACK_TICK_INTERVAL_TARGET_MS,
+} from '../constants';
 import type { Cue, PlaybackState, Routine, SoundId } from '../types';
 import {
   buildOrderedPlaybackCues,
@@ -58,16 +62,30 @@ function createBaseState(routineId: string, nextCueIndex: number): PlaybackState
   };
 }
 
-function isHeadsUpEnabledForCue(cue: Cue, defaultHeadsUpEnabled: boolean): boolean {
-  switch (cue.headsUpOverride) {
-    case 'on':
-      return true;
-    case 'off':
-      return false;
-    case 'inherit':
-    default:
-      return defaultHeadsUpEnabled;
+function resolveRoutineStartDelayMs(startDelayMs: number | undefined): number {
+  if (
+    typeof startDelayMs !== 'number' ||
+    !Number.isFinite(startDelayMs) ||
+    !Number.isInteger(startDelayMs) ||
+    startDelayMs < 0
+  ) {
+    return DEFAULT_ROUTINE_START_DELAY_MS;
   }
+
+  return startDelayMs;
+}
+
+function resolveHeadsUpLeadTimeMs(headsUpLeadTimeMs: number | undefined): number {
+  if (
+    typeof headsUpLeadTimeMs !== 'number' ||
+    !Number.isFinite(headsUpLeadTimeMs) ||
+    !Number.isInteger(headsUpLeadTimeMs) ||
+    headsUpLeadTimeMs < 0
+  ) {
+    return DEFAULT_HEADS_UP_LEAD_TIME_MS;
+  }
+
+  return headsUpLeadTimeMs;
 }
 
 async function safelyInvoke(action: () => Promise<void> | void): Promise<void> {
@@ -89,6 +107,8 @@ function loadDefaultMediaActions(): PlaybackMediaActions {
 
 export function createPlaybackController(options: CreatePlaybackControllerOptions): PlaybackController {
   const { routine } = options;
+  const routineStartDelayMs = resolveRoutineStartDelayMs(routine.startDelayMs);
+  const routineHeadsUpLeadTimeMs = resolveHeadsUpLeadTimeMs(routine.headsUpLeadTimeMs);
   const orderedCues = buildOrderedPlaybackCues(routine.cues);
   const cueById = new Map(orderedCues.map(({ cue }) => [cue.id, cue]));
   const defaultNextCueIndex = orderedCues.length > 0 ? 0 : -1;
@@ -173,9 +193,7 @@ export function createPlaybackController(options: CreatePlaybackControllerOption
 
   const executeCueEvent = async (event: PlaybackDueEvent): Promise<void> => {
     if (event.type === 'headsUp') {
-      if (isHeadsUpEnabledForCue(event.cue, routine.defaultHeadsUpEnabled)) {
-        await safelyInvoke(() => media.playSound('beep'));
-      }
+      await safelyInvoke(() => media.playSound('beep'));
       return;
     }
 
@@ -194,17 +212,32 @@ export function createPlaybackController(options: CreatePlaybackControllerOption
     tickInFlight = true;
 
     try {
-      const rawElapsedMs = computePlaybackElapsedMs({
+      const nowMs = now();
+      const rawElapsedMs = nowMs - state.routineStartTimeMs - state.totalPausedMs;
+      if (rawElapsedMs < 0) {
+        if (state.elapsedMs !== 0) {
+          state = {
+            ...state,
+            elapsedMs: 0,
+          };
+          emitState();
+        }
+        return;
+      }
+
+      const computedElapsedMs = computePlaybackElapsedMs({
         routineStartTimeMs: state.routineStartTimeMs,
-        nowMs: now(),
+        nowMs,
         totalPausedMs: state.totalPausedMs,
       });
-      const currentElapsedMs = Math.min(rawElapsedMs, routine.routineDurationMs);
+      const currentElapsedMs = Math.min(computedElapsedMs, routine.routineDurationMs);
 
       const dueResult = collectDuePlaybackEvents({
         orderedCues,
         previousElapsedMs,
         currentElapsedMs,
+        headsUpEnabled: routine.headsUpEnabled,
+        headsUpLeadTimeMs: routineHeadsUpLeadTimeMs,
         fired: {
           firedCueIds: state.firedCueIds,
           firedHeadsUpCueIds: state.firedHeadsUpCueIds,
@@ -269,7 +302,7 @@ export function createPlaybackController(options: CreatePlaybackControllerOption
   };
 
   const start = (): void => {
-    const startTimeMs = now();
+    const startTimeMs = now() + routineStartDelayMs;
     state = {
       status: 'running',
       routineId: routine.id,
@@ -377,6 +410,49 @@ export function createPlaybackController(options: CreatePlaybackControllerOption
       return;
     }
 
+    const replayOffsetMs = cue.offsetMs;
+    const nowMs = now();
+    const previouslyFiredCueIdsSet = new Set(state.firedCueIds);
+    const previouslyFiredHeadsUpCueIdsSet = new Set(state.firedHeadsUpCueIds);
+    const firedCueIds = orderedCues
+      .filter(({ cue: orderedCue }) => {
+        if (orderedCue.id === cue.id) {
+          return true;
+        }
+
+        return (
+          orderedCue.offsetMs <= replayOffsetMs && previouslyFiredCueIdsSet.has(orderedCue.id)
+        );
+      })
+      .map(({ cue: orderedCue }) => orderedCue.id);
+    const firedHeadsUpCueIds = orderedCues
+      .filter(({ cue: orderedCue }) => {
+        if (orderedCue.id === cue.id) {
+          return true;
+        }
+
+        return (
+          orderedCue.offsetMs <= replayOffsetMs &&
+          previouslyFiredHeadsUpCueIdsSet.has(orderedCue.id)
+        );
+      })
+      .map(({ cue: orderedCue }) => orderedCue.id);
+    const routineStartTimeMs =
+      state.routineStartTimeMs === null
+        ? null
+        : nowMs - replayOffsetMs - state.totalPausedMs;
+
+    previousElapsedMs = replayOffsetMs;
+    state = {
+      ...state,
+      routineStartTimeMs,
+      elapsedMs: replayOffsetMs,
+      firedCueIds,
+      firedHeadsUpCueIds,
+      lastExecutedCueId: cue.id,
+      nextCueIndex: findNextCueSortedIndex(orderedCues, firedCueIds),
+    };
+    emitState();
     void executeCueAction(cue);
   };
 

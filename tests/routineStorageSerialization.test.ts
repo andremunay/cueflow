@@ -16,17 +16,19 @@ function createRoutine(id: string): Routine {
     tags: ['test'],
     favorite: false,
     routineDurationMs: 60_000,
-    defaultHeadsUpEnabled: true,
+    startDelayMs: 3_000,
+    headsUpEnabled: true,
+    headsUpLeadTimeMs: 1_000,
     hapticsEnabled: false,
     duckPlannedFlag: false,
     cues: [
       {
         id: `${id}-cue`,
         offsetMs: 5_000,
-        inputMode: 'elapsed',
         actionType: 'tts',
         ttsText: 'start',
-        headsUpOverride: 'inherit',
+        headsUpOverride: 'on',
+        headsUpLeadTimeMs: 2_000,
       },
     ],
   };
@@ -63,28 +65,66 @@ describe('routine storage serialization', () => {
     expect(snapshot).toEqual(createEmptyRoutineStorageSnapshot());
   });
 
-  it('migrates legacy routine arrays to v1 snapshot shape', () => {
-    const legacyPayload = JSON.stringify([createRoutine('alpha'), createRoutine('beta')]);
+  it('rejects legacy routine arrays', () => {
+    const legacyPayload = JSON.stringify([createRoutine('alpha')]);
 
-    const snapshot = deserializeRoutineStorageSnapshot(legacyPayload);
-
-    expect(snapshot).toEqual({
-      version: ROUTINE_STORAGE_VERSION,
-      routines: [createRoutine('alpha'), createRoutine('beta')],
-    });
+    expectInvalidStorageFormat(() => deserializeRoutineStorageSnapshot(legacyPayload));
   });
 
-  it('migrates legacy wrappers without version to v1 snapshot shape', () => {
+  it('rejects legacy wrappers without explicit version', () => {
     const legacyPayload = JSON.stringify({
       routines: [createRoutine('alpha')],
     });
 
-    const snapshot = deserializeRoutineStorageSnapshot(legacyPayload);
+    expectInvalidStorageFormat(() => deserializeRoutineStorageSnapshot(legacyPayload));
+  });
 
-    expect(snapshot).toEqual({
+  it('rejects routines missing required current-schema fields', () => {
+    const { startDelayMs: _removedStartDelay, ...legacyRoutine } = createRoutine('alpha');
+    const payload = JSON.stringify({
       version: ROUTINE_STORAGE_VERSION,
-      routines: [createRoutine('alpha')],
+      routines: [legacyRoutine],
     });
+
+    expectInvalidStorageFormat(() => deserializeRoutineStorageSnapshot(payload));
+  });
+
+  it('rejects routines containing legacy fields such as cue inputMode', () => {
+    const payload = JSON.stringify({
+      version: ROUTINE_STORAGE_VERSION,
+      routines: [
+        {
+          ...createRoutine('alpha'),
+          cues: [
+            {
+              id: 'cue-legacy',
+              offsetMs: 5_000,
+              inputMode: 'countdown',
+              actionType: 'tts',
+              ttsText: 'legacy',
+              headsUpOverride: 'inherit',
+            },
+          ],
+        },
+      ],
+    });
+
+    expectInvalidStorageFormat(() => deserializeRoutineStorageSnapshot(payload));
+  });
+
+  it('rejects routines containing legacy default heads-up alias', () => {
+    const routine = createRoutine('alpha');
+    const payload = JSON.stringify({
+      version: ROUTINE_STORAGE_VERSION,
+      routines: [
+        {
+          ...routine,
+          defaultHeadsUpEnabled: routine.headsUpEnabled,
+        },
+      ],
+    });
+
+    expectInvalidStorageFormat(() => deserializeRoutineStorageSnapshot(payload));
   });
 
   it('throws INVALID_STORAGE_FORMAT for invalid JSON or unsupported shapes', () => {

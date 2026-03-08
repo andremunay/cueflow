@@ -1,33 +1,33 @@
 import type {
   Cue,
   CueActionType,
-  CueInputMode,
   HeadsUpOverride,
   Routine,
   SoundId,
   ValidationIssue,
 } from '../types';
+import { DEFAULT_HEADS_UP_LEAD_TIME_MS, MAX_ROUTINE_DURATION_MS } from '../constants';
 import { formatCueTimeFromMs, parseAndNormalizeCueOffsetMs, parseCueTimeToMs } from './time';
 import { validateRoutine } from './validation';
 
 export interface EditorCueDraftInput {
   id: string;
   timeText: string;
-  inputMode: CueInputMode;
   actionType: CueActionType;
   ttsText: string;
   soundId: SoundId;
   headsUpOverride: HeadsUpOverride;
+  headsUpLeadTimeText: string;
 }
 
 export interface NormalizedEditorCue {
   id: string;
   offsetMs: number;
-  inputMode: CueInputMode;
   actionType: CueActionType;
   ttsText: string;
   soundId: SoundId;
   headsUpOverride: HeadsUpOverride;
+  headsUpLeadTimeMs?: number;
 }
 
 export interface EditorIssueMessage {
@@ -37,7 +37,10 @@ export interface EditorIssueMessage {
 
 export interface EditorIssueBuckets {
   durationErrorText?: string;
+  startDelayErrorText?: string;
+  headsUpLeadTimeErrorText?: string;
   cueTimeErrorById: Record<string, string>;
+  cueHeadsUpLeadTimeErrorById: Record<string, string>;
   cueTimeWarningById: Record<string, string>;
   routineMessages: EditorIssueMessage[];
   hasErrors: boolean;
@@ -46,11 +49,16 @@ export interface EditorIssueBuckets {
 
 export interface EvaluateEditorDraftParams {
   routineDurationText: string;
+  startDelayText: string;
+  headsUpEnabled: boolean;
+  headsUpLeadTimeText: string;
   cues: EditorCueDraftInput[];
 }
 
 export interface EvaluateEditorDraftResult {
   routineDurationMs: number | null;
+  startDelayMs: number | null;
+  headsUpLeadTimeMs: number | null;
   normalizedCues: NormalizedEditorCue[];
   issues: EditorIssueBuckets;
 }
@@ -62,7 +70,9 @@ export interface BuildRoutineSavePayloadParams {
   tagsText: string;
   favorite: boolean;
   routineDurationMs: number;
-  defaultHeadsUpEnabled: boolean;
+  startDelayMs: number;
+  headsUpEnabled: boolean;
+  headsUpLeadTimeMs: number;
   hapticsEnabled: boolean;
   duckPlannedFlag: boolean;
   normalizedCues: NormalizedEditorCue[];
@@ -72,6 +82,13 @@ export interface BuildRoutineSavePayloadParams {
 export interface BuildRoutineSavePayloadResult {
   operation: 'create' | 'update';
   routine: Routine;
+}
+
+export interface AutoOrderCueDraftsParams<
+  TCueDraft extends Pick<EditorCueDraftInput, 'timeText'>,
+> {
+  cues: readonly TCueDraft[];
+  routineDurationText: string;
 }
 
 const CUE_OFFSET_PATH_REGEX = /^cues\[(\d+)\]\.offsetMs$/;
@@ -95,7 +112,6 @@ function cueToPersistedCue(cue: NormalizedEditorCue): Cue {
   const persistedCue: Cue = {
     id: cue.id,
     offsetMs: cue.offsetMs,
-    inputMode: cue.inputMode,
     actionType: cue.actionType,
     headsUpOverride: cue.headsUpOverride,
   };
@@ -108,6 +124,10 @@ function cueToPersistedCue(cue: NormalizedEditorCue): Cue {
     persistedCue.soundId = cue.soundId;
   }
 
+  if (cue.headsUpOverride === 'on' && cue.headsUpLeadTimeMs !== undefined) {
+    persistedCue.headsUpLeadTimeMs = cue.headsUpLeadTimeMs;
+  }
+
   return persistedCue;
 }
 
@@ -116,6 +136,71 @@ function formatIssueFromValidation(issue: ValidationIssue): EditorIssueMessage {
     severity: issue.severity,
     message: issue.message,
   };
+}
+
+function parseRoutineDurationTextToMsOrUndefined(routineDurationText: string): number | undefined {
+  const parsedRoutineDuration = parseCueTimeToMs(routineDurationText);
+  return parsedRoutineDuration.ok ? parsedRoutineDuration.value : undefined;
+}
+
+function tryParseNormalizedCueOffsetMs(
+  cue: Pick<EditorCueDraftInput, 'timeText'>,
+  routineDurationMs: number | undefined
+): number | null {
+  const parsedOffset = parseAndNormalizeCueOffsetMs({
+    input: cue.timeText,
+    routineDurationMs,
+  });
+
+  if (!parsedOffset.ok) {
+    return null;
+  }
+
+  return parsedOffset.value;
+}
+
+export function autoOrderCueDraftsByNormalizedElapsed<
+  TCueDraft extends Pick<EditorCueDraftInput, 'timeText'>,
+>(params: AutoOrderCueDraftsParams<TCueDraft>): TCueDraft[] {
+  if (params.cues.length < 2) {
+    return [...params.cues];
+  }
+
+  const routineDurationMs = parseRoutineDurationTextToMsOrUndefined(params.routineDurationText);
+  const indexedCues = params.cues.map((cue, originalIndex) => ({
+    cue,
+    originalIndex,
+    normalizedOffsetMs: tryParseNormalizedCueOffsetMs(cue, routineDurationMs),
+  }));
+  const sortedValidCues = indexedCues
+    .filter((indexedCue): indexedCue is typeof indexedCue & { normalizedOffsetMs: number } => {
+      return indexedCue.normalizedOffsetMs !== null;
+    })
+    .sort((left, right) => {
+      const byOffset = left.normalizedOffsetMs - right.normalizedOffsetMs;
+      if (byOffset !== 0) {
+        return byOffset;
+      }
+
+      return left.originalIndex - right.originalIndex;
+    });
+
+  if (sortedValidCues.length < 2) {
+    return [...params.cues];
+  }
+
+  let sortedValidCueIndex = 0;
+  const nextCues = indexedCues.map((indexedCue) => {
+    if (indexedCue.normalizedOffsetMs === null) {
+      return indexedCue.cue;
+    }
+
+    const sortedCue = sortedValidCues[sortedValidCueIndex];
+    sortedValidCueIndex += 1;
+    return sortedCue.cue;
+  });
+
+  return nextCues;
 }
 
 export function parseTagsText(tagsText: string): string[] {
@@ -148,18 +233,16 @@ export function createGeneratedRoutineId(): string {
 }
 
 export function toEditorCueTimeText(
-  offsetMs: number,
-  inputMode: CueInputMode,
-  routineDurationMs: number
+  offsetMs: number
 ): string {
-  const inputMs = inputMode === 'countdown' ? routineDurationMs - offsetMs : offsetMs;
-  const safeInputMs = inputMs < 0 ? 0 : inputMs;
+  const safeInputMs = offsetMs < 0 ? 0 : offsetMs;
   const formatted = formatCueTimeFromMs(safeInputMs);
   return formatted.ok ? formatted.value : DEFAULT_TIME_TEXT;
 }
 
 export function evaluateEditorDraft(params: EvaluateEditorDraftParams): EvaluateEditorDraftResult {
   const cueTimeErrorById: Record<string, string> = {};
+  const cueHeadsUpLeadTimeErrorById: Record<string, string> = {};
   const cueTimeWarningById: Record<string, string> = {};
   const routineMessages: EditorIssueMessage[] = [];
   const normalizedCues: NormalizedEditorCue[] = [];
@@ -167,11 +250,32 @@ export function evaluateEditorDraft(params: EvaluateEditorDraftParams): Evaluate
   const parsedDuration = parseCueTimeToMs(params.routineDurationText);
   const routineDurationMs = parsedDuration.ok ? parsedDuration.value : null;
   const durationErrorText = parsedDuration.ok ? undefined : parsedDuration.error.message;
+  const parsedStartDelay = parseCueTimeToMs(params.startDelayText);
+  let startDelayMs = parsedStartDelay.ok ? parsedStartDelay.value : null;
+  let startDelayErrorText = parsedStartDelay.ok ? undefined : parsedStartDelay.error.message;
+
+  if (startDelayMs !== null && startDelayMs > MAX_ROUTINE_DURATION_MS) {
+    startDelayMs = null;
+    startDelayErrorText = `Start delay cannot exceed ${MAX_ROUTINE_DURATION_MS} milliseconds.`;
+  }
+
+  const parsedHeadsUpLeadTime = parseCueTimeToMs(params.headsUpLeadTimeText);
+  let headsUpLeadTimeMs = params.headsUpEnabled ? null : DEFAULT_HEADS_UP_LEAD_TIME_MS;
+  let headsUpLeadTimeErrorText: string | undefined;
+
+  if (params.headsUpEnabled) {
+    if (!parsedHeadsUpLeadTime.ok) {
+      headsUpLeadTimeErrorText = parsedHeadsUpLeadTime.error.message;
+    } else if (parsedHeadsUpLeadTime.value > MAX_ROUTINE_DURATION_MS) {
+      headsUpLeadTimeErrorText = `Heads-up lead time cannot exceed ${MAX_ROUTINE_DURATION_MS} milliseconds.`;
+    } else {
+      headsUpLeadTimeMs = parsedHeadsUpLeadTime.value;
+    }
+  }
 
   params.cues.forEach((cue) => {
     const normalizedCueOffset = parseAndNormalizeCueOffsetMs({
       input: cue.timeText,
-      inputMode: cue.inputMode,
       routineDurationMs: routineDurationMs ?? undefined,
     });
 
@@ -180,14 +284,31 @@ export function evaluateEditorDraft(params: EvaluateEditorDraftParams): Evaluate
       return;
     }
 
+    let cueHeadsUpLeadTimeMs: number | undefined;
+    if (cue.headsUpOverride === 'on') {
+      const parsedCueHeadsUpLeadTime = parseCueTimeToMs(cue.headsUpLeadTimeText);
+      if (!parsedCueHeadsUpLeadTime.ok) {
+        cueHeadsUpLeadTimeErrorById[cue.id] = parsedCueHeadsUpLeadTime.error.message;
+        return;
+      }
+
+      if (parsedCueHeadsUpLeadTime.value > MAX_ROUTINE_DURATION_MS) {
+        cueHeadsUpLeadTimeErrorById[cue.id] =
+          `Heads-up lead time cannot exceed ${MAX_ROUTINE_DURATION_MS} milliseconds.`;
+        return;
+      }
+
+      cueHeadsUpLeadTimeMs = parsedCueHeadsUpLeadTime.value;
+    }
+
     normalizedCues.push({
       id: cue.id,
       offsetMs: normalizedCueOffset.value,
-      inputMode: cue.inputMode,
       actionType: cue.actionType,
       ttsText: cue.ttsText,
       soundId: cue.soundId,
       headsUpOverride: cue.headsUpOverride,
+      headsUpLeadTimeMs: cueHeadsUpLeadTimeMs,
     });
   });
 
@@ -196,7 +317,6 @@ export function evaluateEditorDraft(params: EvaluateEditorDraftParams): Evaluate
     cues: normalizedCues.map((cue) => ({
       id: cue.id,
       offsetMs: cue.offsetMs,
-      inputMode: cue.inputMode,
     })),
   });
 
@@ -231,7 +351,10 @@ export function evaluateEditorDraft(params: EvaluateEditorDraftParams): Evaluate
 
   const hasErrors =
     Boolean(durationErrorText) ||
+    Boolean(startDelayErrorText) ||
+    Boolean(headsUpLeadTimeErrorText) ||
     Object.keys(cueTimeErrorById).length > 0 ||
+    Object.keys(cueHeadsUpLeadTimeErrorById).length > 0 ||
     routineMessages.some((issue) => issue.severity === 'error');
   const hasWarnings =
     Object.keys(cueTimeWarningById).length > 0 ||
@@ -239,10 +362,15 @@ export function evaluateEditorDraft(params: EvaluateEditorDraftParams): Evaluate
 
   return {
     routineDurationMs,
+    startDelayMs,
+    headsUpLeadTimeMs,
     normalizedCues,
     issues: {
       durationErrorText,
+      startDelayErrorText,
+      headsUpLeadTimeErrorText,
       cueTimeErrorById,
+      cueHeadsUpLeadTimeErrorById,
       cueTimeWarningById,
       routineMessages,
       hasErrors,
@@ -269,7 +397,9 @@ export function buildRoutineSavePayload(
     tags: parseTagsText(params.tagsText),
     favorite: params.favorite,
     routineDurationMs: params.routineDurationMs,
-    defaultHeadsUpEnabled: params.defaultHeadsUpEnabled,
+    startDelayMs: params.startDelayMs,
+    headsUpEnabled: params.headsUpEnabled,
+    headsUpLeadTimeMs: params.headsUpLeadTimeMs,
     hapticsEnabled: params.hapticsEnabled,
     duckPlannedFlag: params.duckPlannedFlag,
     cues: params.normalizedCues.map(cueToPersistedCue),

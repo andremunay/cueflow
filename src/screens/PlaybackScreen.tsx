@@ -2,11 +2,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { PLAYBACK_TICK_INTERVAL_TARGET_MS } from '../constants';
 import type { RootStackParamList } from '../navigation/types';
 import { buildOrderedPlaybackCues, createPlaybackController, getRoutine } from '../services';
 import type { PlaybackController } from '../services';
 import type { Cue, PlaybackState, Routine } from '../types';
-import { formatCueTimeFromMs } from '../utils';
+import { computeDisplayedElapsedMs, formatCueTimeFromMs, formatElapsedClockForDisplay } from '../utils';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Playback'>;
 
@@ -101,6 +102,7 @@ export default function PlaybackScreen({ route }: Props) {
   const [isRoutineMissing, setIsRoutineMissing] = useState(false);
   const [loadErrorMessage, setLoadErrorMessage] = useState<string | null>(null);
   const [playbackState, setPlaybackState] = useState<PlaybackState | null>(null);
+  const [displayNowMs, setDisplayNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     let isActive = true;
@@ -166,6 +168,21 @@ export default function PlaybackScreen({ route }: Props) {
       }
     };
   }, [routine]);
+
+  useEffect(() => {
+    if (playbackState?.status !== 'running' || playbackState.routineStartTimeMs === null) {
+      return;
+    }
+
+    setDisplayNowMs(Date.now());
+    const intervalHandle = setInterval(() => {
+      setDisplayNowMs(Date.now());
+    }, PLAYBACK_TICK_INTERVAL_TARGET_MS);
+
+    return () => {
+      clearInterval(intervalHandle);
+    };
+  }, [playbackState?.routineStartTimeMs, playbackState?.status]);
 
   const orderedCues = useMemo(() => {
     if (!routine) {
@@ -252,7 +269,16 @@ export default function PlaybackScreen({ route }: Props) {
     );
   }
 
-  const elapsedClock = formatClock(playbackState?.elapsedMs ?? 0);
+  const elapsedClock = formatElapsedClockForDisplay(
+    computeDisplayedElapsedMs({
+      status: playbackState?.status ?? 'idle',
+      routineStartTimeMs: playbackState?.routineStartTimeMs ?? null,
+      totalPausedMs: playbackState?.totalPausedMs ?? 0,
+      nowMs: displayNowMs,
+      persistedElapsedMs: playbackState?.elapsedMs ?? 0,
+      routineDurationMs: routine.routineDurationMs,
+    })
+  );
   const routineDuration = formatClock(routine.routineDurationMs);
   const nextCueTime = nextOrderedCue ? formatClock(nextOrderedCue.cue.offsetMs) : '--:--';
   const nextCueAction = nextOrderedCue ? describeCueAction(nextOrderedCue.cue) : 'No upcoming cue';

@@ -1,81 +1,113 @@
-import { StyleSheet, Text, View } from 'react-native';
+import type { LayoutChangeEvent } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import type { CueActionType, CueInputMode, HeadsUpOverride, SoundId } from '../../types';
+import type { CueActionType, HeadsUpOverride, SoundId } from '../../types';
 import ActionTypeSelector from './ActionTypeSelector';
 import CueRowActions from './CueRowActions';
 import HeadsUpOverrideSelector from './HeadsUpOverrideSelector';
 import LabeledTextField from './LabeledTextField';
-import SegmentedOptionSelector, { type SegmentedOption } from './SegmentedOptionSelector';
 import SoundSelector from './SoundSelector';
-
-const INPUT_MODE_OPTIONS: readonly SegmentedOption<CueInputMode>[] = [
-  { label: 'Elapsed', value: 'elapsed' },
-  { label: 'Countdown', value: 'countdown' },
-];
 
 export interface CueRowEditorProps {
   cueLabel?: string;
+  collapsedTimeLabel?: string;
+  collapsed?: boolean;
+  onToggleCollapsed: () => void;
   timeText: string;
-  inputMode: CueInputMode;
   actionType: CueActionType;
   ttsText: string;
   soundId?: SoundId;
   headsUpOverride: HeadsUpOverride;
+  headsUpLeadTimeText: string;
   onTimeTextChange: (value: string) => void;
-  onInputModeChange: (value: CueInputMode) => void;
   onActionTypeChange: (value: CueActionType) => void;
   onTtsTextChange: (value: string) => void;
   onSoundIdChange: (value: SoundId) => void;
   onHeadsUpOverrideChange: (value: HeadsUpOverride) => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
+  onHeadsUpLeadTimeTextChange: (value: string) => void;
+  onPreview: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
-  disableMoveUp?: boolean;
-  disableMoveDown?: boolean;
+  previewDisabled?: boolean;
+  previewLoading?: boolean;
   disableDuplicate?: boolean;
   disableDelete?: boolean;
   disabled?: boolean;
+  cueTimeAutoFocus?: boolean;
+  onLayout?: (event: LayoutChangeEvent) => void;
   timeErrorText?: string;
   timeHelperText?: string;
   ttsErrorText?: string;
   ttsHelperText?: string;
+  headsUpLeadTimeErrorText?: string;
+  headsUpLeadTimeHelperText?: string;
 }
 
 export default function CueRowEditor({
   cueLabel = 'Cue',
+  collapsedTimeLabel = '--:--',
+  collapsed = false,
+  onToggleCollapsed,
   timeText,
-  inputMode,
   actionType,
   ttsText,
   soundId,
   headsUpOverride,
+  headsUpLeadTimeText,
   onTimeTextChange,
-  onInputModeChange,
   onActionTypeChange,
   onTtsTextChange,
   onSoundIdChange,
   onHeadsUpOverrideChange,
-  onMoveUp,
-  onMoveDown,
+  onHeadsUpLeadTimeTextChange,
+  onPreview,
   onDuplicate,
   onDelete,
-  disableMoveUp = false,
-  disableMoveDown = false,
+  previewDisabled = false,
+  previewLoading = false,
   disableDuplicate = false,
   disableDelete = false,
   disabled = false,
+  cueTimeAutoFocus = false,
+  onLayout,
   timeErrorText,
   timeHelperText,
   ttsErrorText,
   ttsHelperText,
+  headsUpLeadTimeErrorText,
+  headsUpLeadTimeHelperText,
 }: CueRowEditorProps) {
   const showsTtsField = actionType === 'tts' || actionType === 'combo';
   const showsSoundField = actionType === 'sound' || actionType === 'combo';
+  const showsHeadsUpLeadTimeField = headsUpOverride === 'on';
+
+  if (collapsed) {
+    return (
+      <Pressable
+        accessibilityLabel={`${cueLabel}. Expand cue details.`}
+        accessibilityRole="button"
+        onPress={onToggleCollapsed}
+        style={styles.collapsedContainer}
+      >
+        <View style={styles.collapsedHeader}>
+          <Text style={styles.title}>{cueLabel}</Text>
+          <Text style={styles.collapsedTimeLabel}>{collapsedTimeLabel}</Text>
+        </View>
+      </Pressable>
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{cueLabel}</Text>
+    <View style={styles.container} onLayout={onLayout}>
+      <Pressable
+        accessibilityLabel={`${cueLabel}. Collapse cue details.`}
+        accessibilityRole="button"
+        disabled={disabled}
+        onPress={onToggleCollapsed}
+        style={[styles.headerPressable, disabled ? styles.headerPressableDisabled : undefined]}
+      >
+        <Text style={styles.title}>{cueLabel}</Text>
+      </Pressable>
       <LabeledTextField
         label="Cue time"
         value={timeText}
@@ -85,15 +117,9 @@ export default function CueRowEditor({
         autoCorrect={false}
         keyboardType="numbers-and-punctuation"
         editable={!disabled}
+        autoFocus={cueTimeAutoFocus}
         errorText={timeErrorText}
         helperText={timeHelperText}
-      />
-      <SegmentedOptionSelector
-        label="Entry mode"
-        value={inputMode}
-        options={INPUT_MODE_OPTIONS}
-        onChange={onInputModeChange}
-        disabled={disabled}
       />
       <ActionTypeSelector value={actionType} onChange={onActionTypeChange} disabled={disabled} />
       {showsTtsField ? (
@@ -115,18 +141,51 @@ export default function CueRowEditor({
           label={actionType === 'combo' ? 'Ping sound' : 'Sound'}
         />
       ) : null}
+      <View style={styles.previewRow}>
+        <Pressable
+          accessibilityLabel="Preview cue"
+          accessibilityRole="button"
+          disabled={disabled || previewDisabled}
+          onPress={onPreview}
+          style={[
+            styles.previewButton,
+            disabled || previewDisabled ? styles.previewButtonDisabled : styles.previewButtonEnabled,
+          ]}
+        >
+          <Text
+            style={[
+              styles.previewButtonLabel,
+              disabled || previewDisabled
+                ? styles.previewButtonLabelDisabled
+                : styles.previewButtonLabelEnabled,
+            ]}
+          >
+            {previewLoading ? 'Previewing...' : 'Preview'}
+          </Text>
+        </Pressable>
+      </View>
       <HeadsUpOverrideSelector
         value={headsUpOverride}
         onChange={onHeadsUpOverrideChange}
         disabled={disabled}
       />
+      {showsHeadsUpLeadTimeField ? (
+        <LabeledTextField
+          label="Heads-up lead time"
+          value={headsUpLeadTimeText}
+          onChangeText={onHeadsUpLeadTimeTextChange}
+          placeholder="mm:ss or hh:mm:ss"
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="numbers-and-punctuation"
+          editable={!disabled}
+          errorText={headsUpLeadTimeErrorText}
+          helperText={headsUpLeadTimeHelperText}
+        />
+      ) : null}
       <CueRowActions
-        onMoveUp={onMoveUp}
-        onMoveDown={onMoveDown}
         onDuplicate={onDuplicate}
         onDelete={onDelete}
-        disableMoveUp={disableMoveUp}
-        disableMoveDown={disableMoveDown}
         disableDuplicate={disableDuplicate}
         disableDelete={disableDelete}
         disabled={disabled}
@@ -145,10 +204,65 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     gap: 6,
   },
+  collapsedContainer: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#DCDCDC',
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: '#FFFFFF',
+  },
+  collapsedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  collapsedTimeLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#555555',
+  },
+  headerPressable: {
+    width: '100%',
+    borderRadius: 8,
+    paddingVertical: 2,
+  },
+  headerPressableDisabled: {
+    opacity: 0.85,
+  },
   title: {
     fontSize: 16,
     fontWeight: '700',
     color: '#1A1A1A',
     marginBottom: 2,
+  },
+  previewRow: {
+    marginTop: 2,
+    alignItems: 'flex-start',
+  },
+  previewButton: {
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  previewButtonEnabled: {
+    borderColor: '#2E5BFF',
+    backgroundColor: '#ECF1FF',
+  },
+  previewButtonDisabled: {
+    borderColor: '#D5D5D5',
+    backgroundColor: '#F3F3F3',
+  },
+  previewButtonLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  previewButtonLabelEnabled: {
+    color: '#1B3CAA',
+  },
+  previewButtonLabelDisabled: {
+    color: '#838383',
   },
 });

@@ -16,17 +16,19 @@ function createRoutineFixture(overrides: Partial<Routine> = {}): Routine {
     tags: ['warmup'],
     favorite: false,
     routineDurationMs: 60_000,
-    defaultHeadsUpEnabled: true,
+    startDelayMs: 3_000,
+    headsUpEnabled: true,
+    headsUpLeadTimeMs: 1_000,
     hapticsEnabled: false,
     duckPlannedFlag: false,
     cues: [
       {
         id: 'cue-1',
         offsetMs: 5_000,
-        inputMode: 'elapsed',
         actionType: 'tts',
         ttsText: 'start',
-        headsUpOverride: 'inherit',
+        headsUpOverride: 'on',
+        headsUpLeadTimeMs: 2_000,
       },
     ],
     ...overrides,
@@ -118,6 +120,65 @@ describe('routine transfer serialization', () => {
     }
   });
 
+  it('rejects routines missing required current-schema fields', () => {
+    const { startDelayMs: _removedStartDelay, ...legacyRoutine } = createRoutineFixture();
+    const payload = JSON.stringify({
+      version: ROUTINE_EXPORT_VERSION,
+      routine: legacyRoutine,
+    });
+
+    try {
+      deserializeRoutineExportWrapper(payload);
+      throw new Error('Expected INVALID_ROUTINE_CONTENT error.');
+    } catch (error) {
+      expectTransferErrorCode(error, 'INVALID_ROUTINE_CONTENT');
+    }
+  });
+
+  it('rejects routines containing legacy default heads-up alias', () => {
+    const routine = createRoutineFixture();
+    const payload = JSON.stringify({
+      version: ROUTINE_EXPORT_VERSION,
+      routine: {
+        ...routine,
+        defaultHeadsUpEnabled: routine.headsUpEnabled,
+      },
+    });
+
+    try {
+      deserializeRoutineExportWrapper(payload);
+      throw new Error('Expected INVALID_ROUTINE_CONTENT error.');
+    } catch (error) {
+      expectTransferErrorCode(error, 'INVALID_ROUTINE_CONTENT');
+    }
+  });
+
+  it('rejects routines containing legacy cue inputMode', () => {
+    const payload = JSON.stringify({
+      version: ROUTINE_EXPORT_VERSION,
+      routine: {
+        ...createRoutineFixture(),
+        cues: [
+          {
+            id: 'cue-legacy',
+            offsetMs: 1_000,
+            inputMode: 'countdown',
+            actionType: 'tts',
+            ttsText: 'legacy',
+            headsUpOverride: 'inherit',
+          },
+        ],
+      },
+    });
+
+    try {
+      deserializeRoutineExportWrapper(payload);
+      throw new Error('Expected INVALID_ROUTINE_CONTENT error.');
+    } catch (error) {
+      expectTransferErrorCode(error, 'INVALID_ROUTINE_CONTENT');
+    }
+  });
+
   it('rejects duplicate cue ids in imported routines', () => {
     const payload = JSON.stringify({
       version: ROUTINE_EXPORT_VERSION,
@@ -127,7 +188,6 @@ describe('routine transfer serialization', () => {
           {
             id: 'cue-duplicate',
             offsetMs: 1_000,
-            inputMode: 'elapsed',
             actionType: 'tts',
             ttsText: 'first',
             headsUpOverride: 'inherit',
@@ -135,7 +195,6 @@ describe('routine transfer serialization', () => {
           {
             id: 'cue-duplicate',
             offsetMs: 3_000,
-            inputMode: 'elapsed',
             actionType: 'tts',
             ttsText: 'second',
             headsUpOverride: 'inherit',

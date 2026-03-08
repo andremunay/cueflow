@@ -14,17 +14,19 @@ function createRoutineFixture(overrides: Partial<Routine> = {}): Routine {
     tags: ['warmup'],
     favorite: false,
     routineDurationMs: 60_000,
-    defaultHeadsUpEnabled: true,
+    startDelayMs: 3_000,
+    headsUpEnabled: true,
+    headsUpLeadTimeMs: 1_000,
     hapticsEnabled: false,
     duckPlannedFlag: false,
     cues: [
       {
         id: 'cue-1',
         offsetMs: 5_000,
-        inputMode: 'elapsed',
         actionType: 'tts',
         ttsText: 'start',
-        headsUpOverride: 'inherit',
+        headsUpOverride: 'on',
+        headsUpLeadTimeMs: 2_000,
       },
     ],
     ...overrides,
@@ -45,7 +47,6 @@ describe('routine transfer parsing', () => {
         {
           id: 'cue-1',
           offsetMs: 1_000,
-          inputMode: 'elapsed',
           actionType: 'tts',
           ttsText: 'first',
           headsUpOverride: 'inherit',
@@ -53,7 +54,6 @@ describe('routine transfer parsing', () => {
         {
           id: 'cue-2',
           offsetMs: 2_500,
-          inputMode: 'elapsed',
           actionType: 'tts',
           ttsText: 'second',
           headsUpOverride: 'inherit',
@@ -74,7 +74,6 @@ describe('routine transfer parsing', () => {
         {
           id: 'cue-1',
           offsetMs: 1_000,
-          inputMode: 'elapsed',
           actionType: 'tts',
           ttsText: 'first',
           headsUpOverride: 'inherit',
@@ -82,7 +81,6 @@ describe('routine transfer parsing', () => {
         {
           id: 'cue-2',
           offsetMs: 1_000,
-          inputMode: 'elapsed',
           actionType: 'tts',
           ttsText: 'duplicate timestamp',
           headsUpOverride: 'inherit',
@@ -105,7 +103,6 @@ describe('routine transfer parsing', () => {
         {
           id: 'cue-1',
           offsetMs: 12_000,
-          inputMode: 'elapsed',
           actionType: 'tts',
           ttsText: 'too late',
           headsUpOverride: 'inherit',
@@ -118,6 +115,32 @@ describe('routine transfer parsing', () => {
       throw new Error('Expected ROUTINE_VALIDATION_FAILED error.');
     } catch (error) {
       expectTransferErrorCode(error, 'ROUTINE_VALIDATION_FAILED');
+    }
+  });
+
+  it('rejects imports that include legacy inputMode fields', () => {
+    const payload = JSON.stringify({
+      version: 1,
+      routine: {
+        ...createRoutineFixture(),
+        cues: [
+          {
+            id: 'cue-legacy',
+            offsetMs: 1_000,
+            inputMode: 'countdown',
+            actionType: 'tts',
+            ttsText: 'legacy',
+            headsUpOverride: 'inherit',
+          },
+        ],
+      },
+    });
+
+    try {
+      parseRoutineImportPayload(payload);
+      throw new Error('Expected INVALID_ROUTINE_CONTENT error.');
+    } catch (error) {
+      expectTransferErrorCode(error, 'INVALID_ROUTINE_CONTENT');
     }
   });
 });
